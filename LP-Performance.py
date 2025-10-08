@@ -28,7 +28,7 @@ if MAPBOX_API_KEY == "DEIN_KEY_HIER" or MAPBOX_API_KEY == "":
 
 
 # ===============================
-# ⚙️ DATENLADE-FUNKTIONEN (unverändert)
+# ⚙️ DATENLADE-FUNKTIONEN
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_excel(file):
@@ -126,7 +126,8 @@ uploaded_file_2 = st.sidebar.file_uploader("Lade Geokoordinaten (LS-Geokoordinat
 df_data, df_geo = None, None
 if uploaded_file_1 and uploaded_file_2:
     df_data = transform_monthly_data(load_excel(uploaded_file_1))
-    df_geo = load_geo_excel_final(load_geo_excel_final(uploaded_file_2))
+    # --- HIER IST DIE KORREKTUR ---
+    df_geo = load_geo_excel_final(uploaded_file_2)
 else:
     st.info("Bitte laden Sie beide Excel-Dateien hoch, um die Analyse zu starten.")
 
@@ -141,11 +142,9 @@ if df_data is not None and not df_data.empty:
     df_standort_filtered = df_data[df_data["Standort"] == selected_standort]
 
     with col2:
-        # --- NEU: Filter für Steuergerät ---
         steuergeraete_options = ["Alle Steuergeräte"] + df_standort_filtered["Steuergerät"].unique().tolist()
         selected_steuergeraet = st.selectbox("2. Steuergerät auswählen (optional):", steuergeraete_options)
 
-    # Filtere die Daten basierend auf beiden Auswahlen
     if selected_steuergeraet == "Alle Steuergeräte":
         df_display = df_standort_filtered
     else:
@@ -174,21 +173,17 @@ if df_data is not None and df_geo is not None and not df_geo.empty:
     df_geo_unique = df_geo.groupby(["Standort", "Steuergerät"])[["Breitengrad", "Längengrad"]].first().reset_index()
     df_merged = pd.merge(df_sum, df_geo_unique, on=["Standort", "Steuergerät"], how="inner")
 
-    # Wende den Steuergeräte-Filter auch auf die Kartendaten an
     df_view = df_merged[df_merged["Standort"] == selected_standort]
     if selected_steuergeraet != "Alle Steuergeräte":
         df_view = df_view[df_view["Steuergerät"] == selected_steuergeraet]
 
     if not df_view.empty:
-        # --- NEU: Daten für Standort-Marker (TextLayer) erstellen ---
         df_standort_marker = df_view.groupby('Standort').agg(
             Breitengrad=('Breitengrad', 'mean'),
             Längengrad=('Längengrad', 'mean')
         ).reset_index()
 
-        # Dynamischen Zoom-Level setzen
         zoom_level = 12 if selected_steuergeraet != "Alle Steuergeräte" else 10
-
         use_mapbox = MAPBOX_API_KEY != "DEIN_KEY_HIER" and MAPBOX_API_KEY != ""
 
         st.pydeck_chart(pdk.Deck(
@@ -200,10 +195,8 @@ if df_data is not None and df_geo is not None and not df_geo.empty:
             layers=[
                 pdk.Layer("HeatmapLayer", data=df_view, get_position='[Längengrad, Breitengrad]',
                           get_weight="Energiemenge", radiusPixels=80),
-                # --- NEU: Ebene für klickbare Punkte ---
                 pdk.Layer("ScatterplotLayer", data=df_view, get_position='[Längengrad, Breitengrad]', get_radius=100,
                           get_fill_color='[255, 140, 0, 100]', pickable=True),
-                # --- NEU: Ebene für Standort-Namen ---
                 pdk.Layer("TextLayer", data=df_standort_marker, get_position='[Längengrad, Breitengrad]',
                           get_text='Standort', get_size=16, get_color='[255, 255, 255]',
                           get_background_color='[0, 0, 0, 120]', background=True)
