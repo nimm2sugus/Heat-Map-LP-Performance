@@ -18,7 +18,7 @@ st.title("🔋 LP-Tool Dashboard – Standortanalyse & Heatmap")
 st.markdown("""
 Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt:
 - Diagramme je Standort  
-- Eine geografische Heatmap nach Energiemengen  
+- Eine geografische Heatmap nach Energiemengen (Gesamt oder pro Monat)
 """)
 
 
@@ -61,7 +61,7 @@ def transform_monthly_data(df):
 
 
 # ===============================
-# ⚙️ GEO-FUNKTION (BLOCKWEISE MIT SPEICHERUNG AM SPALTENENDE)
+# ⚙️ GEO-FUNKTION (BLOCKWEISE)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
@@ -81,65 +81,44 @@ def load_geo_excel(file):
     geo_records = []
 
     for col_idx, standort_name in enumerate(standort_namen, start=1):
-        if pd.isna(standort_name) or col_idx >= len(data_df.columns):
-            continue
-
+        if pd.isna(standort_name) or col_idx >= len(data_df.columns): continue
         col_values = data_df.iloc[:, col_idx]
+        current_steuergerät, ladepunkte, laengengrad, breitengrad = None, [], None, None
 
-        # Variablen für einen einzelnen Steuergerät-Block
-        current_steuergerät = None
-        ladepunkte = []
-        laengengrad = None
-        breitengrad = None
-
-        # Iteriere durch alle Zeilen einer Spalte
         for i, val in enumerate(col_values):
-            if pd.isna(val) or i >= len(labels):
-                continue
-
-            val_str = str(val).strip()
-            label = labels[i]
+            if pd.isna(val) or i >= len(labels): continue
+            val_str, label = str(val).strip(), labels[i]
 
             if label == "Steuergerät" and val_str:
-                if current_steuergerät and ladepunkte and laengengrad is not None and breitengrad is not None:
-                    for lp in ladepunkte:
-                        geo_records.append(
-                            {"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
-                             "Längengrad": laengengrad, "Breitengrad": breitengrad})
-
-                current_steuergerät = val_str
-                ladepunkte = []
-                laengengrad = None
-                breitengrad = None
+                if all((current_steuergerät, ladepunkte, laengengrad is not None, breitengrad is not None)):
+                    for lp in ladepunkte: geo_records.append(
+                        {"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
+                         "Längengrad": laengengrad, "Breitengrad": breitengrad})
+                current_steuergerät, ladepunkte, laengengrad, breitengrad = val_str, [], None, None
                 continue
 
             if label == "EVSE-ID" and re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val_str, re.IGNORECASE):
                 ladepunkte.append(val_str)
             elif label == "Längengrad" and val_str:
                 try:
-                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())
-                    laengengrad = float(matches[0]) if matches else None
+                    laengengrad = float(
+                        re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
                 except (ValueError, IndexError):
                     laengengrad = None
             elif label == "Breitengrad" and val_str:
                 try:
-                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())
-                    breitengrad = float(matches[0]) if matches else None
+                    breitengrad = float(
+                        re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
                 except (ValueError, IndexError):
                     breitengrad = None
 
-        # <-- HIER PASSIERT DIE "SCHLUSS-SPEICHERUNG" FÜR DEN LETZTEN BLOCK DER SPALTE
-        if current_steuergerät and ladepunkte and laengengrad is not None and breitengrad is not None:
-            for lp in ladepunkte:
-                geo_records.append({"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
-                                    "Längengrad": laengengrad, "Breitengrad": breitengrad})
+        if all((current_steuergerät, ladepunkte, laengengrad is not None, breitengrad is not None)):
+            for lp in ladepunkte: geo_records.append(
+                {"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
+                 "Längengrad": laengengrad, "Breitengrad": breitengrad})
 
     geo_df = pd.DataFrame(geo_records)
-
-    if not geo_df.empty:
-        geo_df = geo_df.dropna(subset=["Breitengrad", "Längengrad"])
-
-    return geo_df
+    return geo_df if geo_df.empty else geo_df.dropna(subset=["Breitengrad", "Längengrad"])
 
 
 # ===============================
@@ -171,17 +150,33 @@ else:
     st.info("Bitte zuerst die Datei **Test LP-Tool.xlsx** hochladen.")
 
 # ===============================
-# 🗺️ HEATMAP
+# 🗺️ HEATMAP (MIT MONATSAUSWAHL)
 # ===============================
 if df_data is not None and uploaded_file_2:
     df_geo = load_geo_excel(uploaded_file_2)
-    st.subheader("🌍 Standort-Heatmap basierend auf Energiemengen")
+
+    st.header("🌍 Standort-Heatmap")
+
     if not df_geo.empty:
-        st.markdown("Erfolgreich eingelesene Geodaten (Auszug):")
-        st.dataframe(df_geo.head(20), use_container_width=True)
-        df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
+        # --- NEU: Auswahl für den Zeitraum ---
+        time_options = ["Gesamtzeit"] + df_data['Monat'].unique().tolist()
+        selected_timespan = st.selectbox("Zeitraum für Heatmap auswählen:", time_options)
+
+        # --- NEU: Dynamische Datenaggregation basierend auf der Auswahl ---
+        if selected_timespan == "Gesamtzeit":
+            st.subheader("Gesamtenergiemenge aller Monate")
+            df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
+        else:
+            st.subheader(f"Energiemenge im {selected_timespan}")
+            df_monthly = df_data[df_data["Monat"] == selected_timespan]
+            df_sum = df_monthly.groupby("Standort")["Energiemenge"].sum().reset_index()
+
+        # Bündeln der Koordinaten pro Standort (es wird die erste gefundene Koordinate verwendet)
         df_geo_unique = df_geo.groupby("Standort")[["Breitengrad", "Längengrad"]].first().reset_index()
+
+        # Zusammenführen der Energie- und Geodaten
         df_merged = pd.merge(df_sum, df_geo_unique, on="Standort", how="inner")
+
         if not df_merged.empty:
             st.pydeck_chart(pdk.Deck(
                 map_style="mapbox://styles/mapbox/light-v9",
@@ -197,6 +192,7 @@ if df_data is not None and uploaded_file_2:
                          "style": {"backgroundColor": "steelblue", "color": "white"}}
             ))
         else:
-            st.warning("Keine übereinstimmenden Standorte zwischen den beiden Dateien für die Heatmap gefunden.")
+            st.warning(
+                f"Keine übereinstimmenden Standorte mit Energiedaten für den Zeitraum '{selected_timespan}' gefunden.")
     else:
         st.warning("Die hochgeladene Geo-Datei enthält keine gültigen oder auslesbaren Koordinaten.")
