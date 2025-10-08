@@ -25,10 +25,6 @@ Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt:
 # ⚙️ HELPER FÜR DYNAMISCHES HEADER-FINDEN (Monatsdaten)
 # ===============================
 def find_header_row(file, required_columns):
-    """
-    Sucht die Zeile, die mindestens alle required_columns enthält.
-    Gibt die Zeilennummer zurück, die als Header genutzt werden soll.
-    """
     raw = pd.read_excel(file, header=None)
     for i, row in raw.iterrows():
         row_values = [str(col).strip() for col in row]
@@ -37,9 +33,6 @@ def find_header_row(file, required_columns):
     raise ValueError(f"Keine passende Header-Zeile gefunden. Erwartete Spalten: {required_columns}")
 
 def load_excel_dynamic(file, required_columns):
-    """
-    Liest eine Excel-Datei, sucht dynamisch die Header-Zeile und lädt die Daten ab dieser Zeile.
-    """
     header_row, _ = find_header_row(file, required_columns)
     df = pd.read_excel(file, header=header_row)
     return df
@@ -54,9 +47,6 @@ def load_excel(file):
 
 @st.cache_data(show_spinner=True)
 def transform_monthly_data(df):
-    """
-    Wandelt die LP-Tabelle in langes Format um und sortiert Monate korrekt.
-    """
     df["Standort"] = df["Ist in kWh"].fillna(method="ffill")
 
     df = df.rename(columns={
@@ -84,17 +74,12 @@ def transform_monthly_data(df):
 
     df_long["Monat"] = pd.Categorical(df_long["Monat"], categories=month_order, ordered=True)
     df_long = df_long.sort_values(["Standort", "Monat"])
-
     return df_long
 
 # ===============================
-# ⚙️ GEO-FUNKTION (robuste Header-Suche)
+# ⚙️ GEO-FUNKTION (robust, alle Standorte, Steuergerät Korrektur)
 # ===============================
 def find_geo_header_row(file):
-    """
-    Sucht eine Header-Zeile für Geo-Datei.
-    Die erste Spalte muss nicht leer sein (z.B. Label-Spalte).
-    """
     raw = pd.read_excel(file, header=None)
     for i, row in raw.iterrows():
         first_col = str(row[0]).strip() if pd.notna(row[0]) else ""
@@ -104,15 +89,12 @@ def find_geo_header_row(file):
 
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
-    """
-    Liest Geo-Excel mit dynamischem Header.
-    Header-Zeile wird gesucht, danach werden alle Spalten als Standorte verarbeitet.
-    """
     header_row = find_geo_header_row(file)
     df_raw = pd.read_excel(file, header=header_row)
 
     geo_records = []
-    for col_idx in range(1, df_raw.shape[1]):
+
+    for col_idx in range(1, df_raw.shape[1]):  # alle Standorte ab Spalte 2
         standort = str(df_raw.columns[col_idx]).strip()
         if not standort or standort.lower() == "nan":
             continue
@@ -126,25 +108,17 @@ def load_geo_excel(file):
         ladepunkte = []
         lon = lat = None
 
-        for _, row in col_data.iterrows():
-            label = row["Label"].lower()
-            val = row["Value"]
+        # Wir nehmen Steuergerät eine Zeile oberhalb der Ladepunkte
+        for i in range(len(col_data)):
+            label = col_data.iloc[i]["Label"].lower()
+            val = col_data.iloc[i]["Value"]
 
-            if re.match(r"^[A-Za-z0-9]{6,}$", val) and "grad" not in label:
-                if current_steuergerät and ladepunkte:
-                    for lp in ladepunkte:
-                        geo_records.append({
-                            "Standort": standort,
-                            "Steuergerät": current_steuergerät,
-                            "Ladepunkt": lp,
-                            "Longitude": lon,
-                            "Latitude": lat
-                        })
-                current_steuergerät = val
-                ladepunkte = []
-                lon = lat = None
-
-            elif re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
+            if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):  # Ladepunkt
+                # Steuergerät aus vorheriger Zeile
+                if i > 0:
+                    prev_val = col_data.iloc[i - 1]["Value"]
+                    if re.match(r"^[A-Za-z0-9]{6,}$", prev_val):
+                        current_steuergerät = prev_val
                 ladepunkte.append(val)
 
             elif "längengrad" in label:
@@ -158,6 +132,7 @@ def load_geo_excel(file):
                 except:
                     lat = None
 
+        # alle Ladepunkte abspeichern
         if current_steuergerät and ladepunkte:
             for lp in ladepunkte:
                 geo_records.append({
@@ -217,7 +192,7 @@ if uploaded_file_1 and uploaded_file_2:
     df_geo = load_geo_excel(uploaded_file_2)
 
     st.subheader("🌍 Standort-Heatmap basierend auf Energiemengen")
-    st.dataframe(df_geo.head(), use_container_width=True)
+    st.dataframe(df_geo.head(20), use_container_width=True)  # alle Standorte sichtbar
 
     if all(col in df_geo.columns for col in ["Standort", "Latitude", "Longitude"]):
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
@@ -229,7 +204,7 @@ if uploaded_file_1 and uploaded_file_2:
         )
 
         st.pydeck_chart(pdk.Deck(
-            map_style="open-street-map",
+            map_style="open-street-map",  # Hintergrundkarte korrekt
             initial_view_state=pdk.ViewState(
                 latitude=df_merged["Latitude"].mean(),
                 longitude=df_merged["Longitude"].mean(),
