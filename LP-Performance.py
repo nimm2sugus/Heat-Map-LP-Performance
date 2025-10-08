@@ -22,7 +22,7 @@ Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt:
 """)
 
 # ===============================
-# ⚙️ HELPER FÜR DYNAMISCHES HEADER-FINDEN
+# ⚙️ HELPER FÜR DYNAMISCHES HEADER-FINDEN (Monatsdaten)
 # ===============================
 def find_header_row(file, required_columns):
     """
@@ -88,16 +88,27 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ GEO-FUNKTION (dynamisch Header)
+# ⚙️ GEO-FUNKTION (robuste Header-Suche)
 # ===============================
+def find_geo_header_row(file):
+    """
+    Sucht eine Header-Zeile für Geo-Datei.
+    Die erste Spalte muss nicht leer sein (z.B. Label-Spalte).
+    """
+    raw = pd.read_excel(file, header=None)
+    for i, row in raw.iterrows():
+        first_col = str(row[0]).strip() if pd.notna(row[0]) else ""
+        if first_col and "grad" not in first_col.lower():
+            return i
+    raise ValueError("Keine passende Header-Zeile für Geo-Datei gefunden.")
+
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
     """
     Liest Geo-Excel mit dynamischem Header.
     Header-Zeile wird gesucht, danach werden alle Spalten als Standorte verarbeitet.
     """
-    required_columns = ["Label"]  # Pflichtspalte
-    header_row, _ = find_header_row(file, required_columns)
+    header_row = find_geo_header_row(file)
     df_raw = pd.read_excel(file, header=header_row)
 
     geo_records = []
