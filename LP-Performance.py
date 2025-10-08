@@ -75,7 +75,7 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ GEO-FUNKTION (erste Spalte = Labels, andere Spalten = Standorte)
+# ⚙️ GEO-FUNKTION
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
@@ -87,35 +87,34 @@ def load_geo_excel(file):
 
     for col_idx, standort in enumerate(standorte, start=1):
         col_values = raw.iloc[:, col_idx]
-
         current_steuergerät = None
-        ladepunkte = []
         laengengrad = None
         breitengrad = None
+        ladepunkte = []
 
+        # Durch alle Zeilen gehen
         for i, val in enumerate(col_values):
             val = str(val).strip().replace(",", ".").replace("°", "")
             label = labels[i]
 
-            # Steuergerät erkennen
             if label == "Steuergerät":
                 current_steuergerät = val
                 ladepunkte = []
                 continue
 
-            # Ladepunkte erkennen
-            if label == "Ladepunkt" and re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
-                ladepunkte.append(val)
+            if label == "Ladepunkt":
+                if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
+                    ladepunkte.append(val)
                 continue
 
-            # Längengrad / Breitengrad erkennen
             if label == "Längengrad":
                 try:
                     laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
                     laengengrad = None
                 continue
-            elif label == "Breitengrad":
+
+            if label == "Breitengrad":
                 try:
                     breitengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
