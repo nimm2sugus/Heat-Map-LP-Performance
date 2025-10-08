@@ -179,17 +179,22 @@ if uploaded_file_1 and uploaded_file_2:
     st.dataframe(df_geo.head(), use_container_width=True)
 
     if all(col in df_geo.columns for col in ["Standort", "Latitude", "Longitude"]):
+        # Summe pro Standort
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
-        df_merged = pd.merge(df_sum, df_geo.groupby("Standort")[["Latitude", "Longitude"]].first().reset_index(),
-                             on="Standort", how="inner")
+        df_merged = pd.merge(
+            df_sum,
+            df_geo.groupby("Standort")[["Latitude", "Longitude"]].first().reset_index(),
+            on="Standort",
+            how="inner"
+        )
 
         st.pydeck_chart(pdk.Deck(
-            map_style="mapbox://styles/mapbox/light-v9",
+            map_style="open-street-map",  # OpenStreetMap ohne Token
             initial_view_state=pdk.ViewState(
                 latitude=df_merged["Latitude"].mean(),
                 longitude=df_merged["Longitude"].mean(),
                 zoom=6,
-                pitch=45,
+                pitch=0,
             ),
             layers=[
                 pdk.Layer(
