@@ -71,35 +71,35 @@ def transform_monthly_data(df):
 
 
 # ===============================
-# ⚙️ KORRIGIERTE GEO-FUNKTION (MIT DYNAMISCHER HEADER-ERKENNUNG)
+# ⚙️ KORRIGIERTE GEO-FUNKTION (FINDE ERSTE ZEILE MIT DATEN AB SPALTE B)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
     """
     Liest eine Excel-Datei mit Geodaten und erkennt dynamisch die Header-Zeile.
-    - Sucht nach der Zeile mit den Standortnamen.
-    - Spalte A enthält die Labels ("Steuergerät", etc.).
-    - Verarbeitet mehrere Steuergeräte pro Standort.
+    Die Header-Zeile wird als die ERSTE Zeile definiert, die ab Spalte B einen Wert enthält.
     """
     raw = pd.read_excel(file, header=None)
 
     # --- Dynamische Header-Erkennung ---
     header_row_index = -1
-    # Durchsuche die ersten 10 Zeilen nach einer plausiblen Header-Zeile.
+    # Durchsuche die ersten 10 Zeilen der Datei.
     for i in range(min(10, len(raw))):
         row_values = raw.iloc[i].values
-        # Kriterium: Die erste Zelle ist leer, aber die Zeile enthält ansonsten Werte (Standortnamen).
-        if pd.isna(row_values[0]) and any(pd.notna(val) for val in row_values[1:]):
-            header_row_index = i
-            break
+        # NEUES, VEREINFACHTES Kriterium:
+        # Ist dies die erste Zeile, die ab der zweiten Spalte (Index 1) Daten enthält?
+        if any(pd.notna(val) for val in row_values[1:]):
+            header_row_index = i  # Zeilennummer speichern
+            break  # Suche beenden, da die erste Zeile gefunden wurde
 
-    # Wenn keine passende Zeile gefunden wurde, zeige eine Fehlermeldung.
+    # Wenn nach der Suche keine passende Zeile gefunden wurde, zeige eine Fehlermeldung.
     if header_row_index == -1:
-        st.error("Konnte die Header-Zeile (mit Standortnamen) in der Geo-Datei nicht automatisch finden.")
+        st.error("Konnte keine Daten ab Spalte B in den ersten 10 Zeilen der Geo-Datei finden.")
         return pd.DataFrame()
 
     # --- Datenextraktion basierend auf der gefundenen Header-Zeile ---
     standort_namen = raw.iloc[header_row_index, 1:].tolist()
+    # Die eigentlichen Daten beginnen in der Zeile direkt nach dem Header.
     data_df = raw.iloc[header_row_index + 1:].reset_index(drop=True)
     labels = data_df.iloc[:, 0].astype(str).str.strip()
 
