@@ -16,8 +16,6 @@ st.set_page_config(
 # ===============================
 # 🔑 TOKEN-KONFIGURATION (Optional, aber empfohlen)
 # ===============================
-# Ersetzen Sie "DEIN_KEY_HIER" durch Ihren kostenlosen Key von https://www.mapbox.com
-# für die zuverlässigste Kartendarstellung.
 MAPBOX_API_KEY = "pk.eyJ1IjoibmltbTJzdWd1cyIsImEiOiJjbWdoeGMwbzEwMWN6MmpxeHNuOWtwb2N5In0.Y0VtWicxzoEvUcxdsLh9sQ"
 
 st.title("🔋 LP-Tool Dashboard – Standortanalyse & Heatmap")
@@ -30,7 +28,7 @@ if MAPBOX_API_KEY == "DEIN_KEY_HIER" or MAPBOX_API_KEY == "":
 
 
 # ===============================
-# ⚙️ CACHING FÜR MONATSDATEN
+# ⚙️ DATENLADE-FUNKTIONEN (unverändert)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_excel(file):
@@ -64,9 +62,6 @@ def transform_monthly_data(df):
     return df_long
 
 
-# ===============================
-# ⚙️ FINALE, FLEXIBLE GEO-FUNKTION
-# ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel_final(file):
     raw = pd.read_excel(file, header=None)
@@ -126,77 +121,96 @@ uploaded_file_1 = st.sidebar.file_uploader("Lade Monatsdaten (Test LP-Tool.xlsx)
 uploaded_file_2 = st.sidebar.file_uploader("Lade Geokoordinaten (LS-Geokoordinaten.xlsx)", type=["xlsx"], key="file2")
 
 # ===============================
-# 📈 ANZEIGE DER MONATSDATEN
+# 📈 DATENANALYSE & FILTER
 # ===============================
-df_data = None
-if uploaded_file_1:
-    df_raw = load_excel(uploaded_file_1)
-    if not df_raw.empty:
-        df_data = transform_monthly_data(df_raw)
-        st.subheader("📊 Bereinigte Monatswerte je Standort")
-        with st.expander("Vollständige Monatstabelle anzeigen (df_data)"):
-            st.dataframe(df_data, use_container_width=True)
-        standorte = sorted(df_data["Standort"].dropna().unique())
-        if standorte:
-            selected_standort = st.selectbox("Standort auswählen:", standorte)
-            df_filtered = df_data[df_data["Standort"] == selected_standort]
-            st.markdown(
-                f"**Anzahl Ladepunkte:** {df_filtered['EVSE'].nunique()} | **Steuergeräte:** {df_filtered['Steuergerät'].nunique()}")
-            df_chart = df_filtered.groupby("Monat")["Energiemenge"].sum().reset_index()
-            st.bar_chart(df_chart, x="Monat", y="Energiemenge", use_container_width=True)
+df_data, df_geo = None, None
+if uploaded_file_1 and uploaded_file_2:
+    df_data = transform_monthly_data(load_excel(uploaded_file_1))
+    df_geo = load_geo_excel_final(load_geo_excel_final(uploaded_file_2))
 else:
-    st.info("Bitte zuerst die Datei **Test LP-Tool.xlsx** hochladen.")
+    st.info("Bitte laden Sie beide Excel-Dateien hoch, um die Analyse zu starten.")
 
-# ===============================
-# 🗺️ HEATMAP (PRO STEUERGERÄT)
-# ===============================
-if df_data is not None and uploaded_file_2:
-    df_geo = load_geo_excel_final(uploaded_file_2)
-    st.header("🌍 Standort-Heatmap")
-    if not df_geo.empty:
-        st.success("Erfolgreich Geodaten eingelesen!")
-        with st.expander("Vollständige Geo-Tabelle anzeigen (df_geo)"):
-            st.dataframe(df_geo, use_container_width=True)
+if df_data is not None and not df_data.empty:
+    st.header("📊 Standort- und Gerätedaten")
+    standorte = sorted(df_data["Standort"].dropna().unique())
 
-        time_options = ["Gesamtzeit"] + df_data['Monat'].unique().tolist()
-        selected_timespan = st.selectbox("Zeitraum für Heatmap auswählen:", time_options)
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_standort = st.selectbox("1. Standort auswählen:", standorte)
 
-        # --- ÄNDERUNG: Aggregation pro Steuergerät ---
-        if selected_timespan == "Gesamtzeit":
-            st.subheader("Gesamtenergiemenge pro Steuergerät")
-            df_sum = df_data.groupby(["Standort", "Steuergerät"])["Energiemenge"].sum().reset_index()
-        else:
-            st.subheader(f"Energiemenge pro Steuergerät im {selected_timespan}")
-            df_monthly = df_data[df_data["Monat"] == selected_timespan]
-            df_sum = df_monthly.groupby(["Standort", "Steuergerät"])["Energiemenge"].sum().reset_index()
+    df_standort_filtered = df_data[df_data["Standort"] == selected_standort]
 
-        # --- ÄNDERUNG: Koordinaten pro Steuergerät holen ---
-        df_geo_unique = df_geo.groupby(["Standort", "Steuergerät"])[["Breitengrad", "Längengrad"]].first().reset_index()
+    with col2:
+        # --- NEU: Filter für Steuergerät ---
+        steuergeraete_options = ["Alle Steuergeräte"] + df_standort_filtered["Steuergerät"].unique().tolist()
+        selected_steuergeraet = st.selectbox("2. Steuergerät auswählen (optional):", steuergeraete_options)
 
-        # --- ÄNDERUNG: Merge über Standort UND Steuergerät ---
-        df_merged = pd.merge(df_sum, df_geo_unique, on=["Standort", "Steuergerät"], how="inner")
-
-        if not df_merged.empty:
-            # Entscheidung für Kartenanbieter basierend auf API Key
-            use_mapbox = MAPBOX_API_KEY != "DEIN_KEY_HIER" and MAPBOX_API_KEY != ""
-
-            st.pydeck_chart(pdk.Deck(
-                map_provider="mapbox" if use_mapbox else None,
-                map_style=pdk.map_styles.SATELLITE if use_mapbox else 'open-street-map',
-                api_keys={'mapbox': MAPBOX_API_KEY} if use_mapbox else None,
-                initial_view_state=pdk.ViewState(latitude=df_merged["Breitengrad"].mean(),
-                                                 longitude=df_merged["Längengrad"].mean(), zoom=5, pitch=45),
-                layers=[
-                    pdk.Layer("HeatmapLayer", data=df_merged, get_position='[Längengrad, Breitengrad]',
-                              get_weight="Energiemenge", radiusPixels=60, aggregation=pdk.types.String("SUM")),
-                ],
-                # --- ÄNDERUNG: Tooltip um Steuergerät erweitert ---
-                tooltip={
-                    "html": "<b>Standort:</b> {Standort}<br/><b>Steuergerät:</b> {Steuergerät}<br/><b>Energiemenge:</b> {Energiemenge} kWh",
-                    "style": {"backgroundColor": "steelblue", "color": "white"}}
-            ))
-        else:
-            st.warning(
-                f"Keine übereinstimmenden Standorte mit Energiedaten für den Zeitraum '{selected_timespan}' gefunden.")
+    # Filtere die Daten basierend auf beiden Auswahlen
+    if selected_steuergeraet == "Alle Steuergeräte":
+        df_display = df_standort_filtered
     else:
-        st.warning("Die hochgeladene Geo-Datei enthält keine gültigen oder auslesbaren Koordinaten.")
+        df_display = df_standort_filtered[df_standort_filtered["Steuergerät"] == selected_steuergeraet]
+
+    st.markdown(
+        f"**Angezeigte Ladepunkte:** {df_display['EVSE'].nunique()} | **Angezeigte Steuergeräte:** {df_display['Steuergerät'].nunique()}")
+    df_chart = df_display.groupby("Monat")["Energiemenge"].sum().reset_index()
+    st.bar_chart(df_chart, x="Monat", y="Energiemenge", use_container_width=True)
+
+# ===============================
+# 🗺️ INTERAKTIVE HEATMAP
+# ===============================
+if df_data is not None and df_geo is not None and not df_geo.empty:
+    st.header("🌍 Interaktive Heatmap")
+
+    time_options = ["Gesamtzeit"] + df_data['Monat'].unique().tolist()
+    selected_timespan = st.selectbox("Zeitraum für Heatmap auswählen:", time_options)
+
+    if selected_timespan == "Gesamtzeit":
+        df_sum = df_data.groupby(["Standort", "Steuergerät"])["Energiemenge"].sum().reset_index()
+    else:
+        df_monthly = df_data[df_data["Monat"] == selected_timespan]
+        df_sum = df_monthly.groupby(["Standort", "Steuergerät"])["Energiemenge"].sum().reset_index()
+
+    df_geo_unique = df_geo.groupby(["Standort", "Steuergerät"])[["Breitengrad", "Längengrad"]].first().reset_index()
+    df_merged = pd.merge(df_sum, df_geo_unique, on=["Standort", "Steuergerät"], how="inner")
+
+    # Wende den Steuergeräte-Filter auch auf die Kartendaten an
+    df_view = df_merged[df_merged["Standort"] == selected_standort]
+    if selected_steuergeraet != "Alle Steuergeräte":
+        df_view = df_view[df_view["Steuergerät"] == selected_steuergeraet]
+
+    if not df_view.empty:
+        # --- NEU: Daten für Standort-Marker (TextLayer) erstellen ---
+        df_standort_marker = df_view.groupby('Standort').agg(
+            Breitengrad=('Breitengrad', 'mean'),
+            Längengrad=('Längengrad', 'mean')
+        ).reset_index()
+
+        # Dynamischen Zoom-Level setzen
+        zoom_level = 12 if selected_steuergeraet != "Alle Steuergeräte" else 10
+
+        use_mapbox = MAPBOX_API_KEY != "DEIN_KEY_HIER" and MAPBOX_API_KEY != ""
+
+        st.pydeck_chart(pdk.Deck(
+            map_provider="mapbox" if use_mapbox else None,
+            map_style=pdk.map_styles.SATELLITE if use_mapbox else 'open-street-map',
+            api_keys={'mapbox': MAPBOX_API_KEY} if use_mapbox else None,
+            initial_view_state=pdk.ViewState(latitude=df_view["Breitengrad"].mean(),
+                                             longitude=df_view["Längengrad"].mean(), zoom=zoom_level, pitch=45),
+            layers=[
+                pdk.Layer("HeatmapLayer", data=df_view, get_position='[Längengrad, Breitengrad]',
+                          get_weight="Energiemenge", radiusPixels=80),
+                # --- NEU: Ebene für klickbare Punkte ---
+                pdk.Layer("ScatterplotLayer", data=df_view, get_position='[Längengrad, Breitengrad]', get_radius=100,
+                          get_fill_color='[255, 140, 0, 100]', pickable=True),
+                # --- NEU: Ebene für Standort-Namen ---
+                pdk.Layer("TextLayer", data=df_standort_marker, get_position='[Längengrad, Breitengrad]',
+                          get_text='Standort', get_size=16, get_color='[255, 255, 255]',
+                          get_background_color='[0, 0, 0, 120]', background=True)
+            ],
+            tooltip={
+                "html": "<b>Standort:</b> {Standort}<br/><b>Steuergerät:</b> {Steuergerät}<br/><b>Energiemenge:</b> {Energiemenge} kWh",
+                "style": {"backgroundColor": "steelblue", "color": "white"}}
+        ))
+    else:
+        st.warning(f"Für die aktuelle Auswahl wurden keine darstellbaren Daten gefunden.")
