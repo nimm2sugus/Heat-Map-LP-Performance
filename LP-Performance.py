@@ -92,22 +92,12 @@ def load_geo_excel(file):
         laengengrad = None
         breitengrad = None
 
+        # Durch die Zeilen gehen
         for i, val in enumerate(col_values):
             val = str(val).strip().replace(",", ".").replace("°", "")
             label = labels[i]
 
-            # Steuergerät erkennen
-            if re.match(r"^[A-Za-z0-9]{6,}$", val):
-                current_steuergerät = val
-                ladepunkte = []
-                continue
-
-            # Ladepunkte erkennen
-            if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
-                ladepunkte.append(val)
-                continue
-
-            # Längengrad / Breitengrad erkennen (Labels: erster Buchstabe groß)
+            # Längengrad / Breitengrad erkennen
             if label == "Längengrad":
                 try:
                     laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
@@ -119,6 +109,16 @@ def load_geo_excel(file):
                     breitengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
                     breitengrad = None
+                continue
+
+            # Ladepunkte erkennen
+            if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
+                ladepunkte.append(val)
+                # Steuergerät eine Zeile oberhalb des ersten Ladepunkts
+                if i > 0:
+                    steuergerät_candidate = str(col_values[i - 1]).strip()
+                    if re.match(r"^[A-Za-z0-9]{6,}$", steuergerät_candidate):
+                        current_steuergerät = steuergerät_candidate
                 continue
 
         # alle Ladepunkte abspeichern
