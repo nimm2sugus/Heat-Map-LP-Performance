@@ -74,7 +74,6 @@ def load_geo_excel_final(file):
 
     for col_idx, standort_name in enumerate(standort_namen, start=1):
         if pd.isna(standort_name) or col_idx >= len(data_df.columns): continue
-
         col_values = data_df.iloc[:, col_idx]
         current_steuergerät, ladepunkte, laengengrad, breitengrad = None, [], None, None
 
@@ -82,10 +81,7 @@ def load_geo_excel_final(file):
             if pd.isna(val) or i >= len(labels): continue
             val_str, label = str(val).strip(), labels[i]
 
-            # --- FLEXIBLE ERKENNUNG ---
-            # Erkennt "Steuergerät", "Steuergerät-ID", "Steuergerät ID", etc.
             is_steuergeraet_row = 'steuergerät' in label.lower()
-            # Erkennt eine EVSE-ID am Format, unabhängig vom Label
             is_evse_id_row = re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val_str, re.IGNORECASE)
 
             if is_steuergeraet_row and val_str:
@@ -93,19 +89,18 @@ def load_geo_excel_final(file):
                     for lp in ladepunkte: geo_records.append(
                         {"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
                          "Längengrad": laengengrad, "Breitengrad": breitengrad})
-
                 current_steuergerät, ladepunkte, laengengrad, breitengrad = val_str, [], None, None
                 continue
 
             if is_evse_id_row:
                 ladepunkte.append(val_str)
-            elif label == "Längengrad" and val_str:
+            elif label.lower() == "längengrad" and val_str:
                 try:
                     laengengrad = float(
                         re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
                 except (ValueError, IndexError):
                     laengengrad = None
-            elif label == "Breitengrad" and val_str:
+            elif label.lower() == "breitengrad" and val_str:
                 try:
                     breitengrad = float(
                         re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
@@ -137,7 +132,11 @@ if uploaded_file_1:
     if not df_raw.empty:
         df_data = transform_monthly_data(df_raw)
         st.subheader("📊 Bereinigte Monatswerte je Standort")
-        st.dataframe(df_data.head(20), use_container_width=True)
+
+        # --- NEU: Vollständige Tabelle in einem Expander ---
+        with st.expander("Vollständige Monatstabelle anzeigen (df_data)"):
+            st.dataframe(df_data, use_container_width=True)
+
         standorte = sorted(df_data["Standort"].dropna().unique())
         if standorte:
             selected_standort = st.selectbox("Standort auswählen:", standorte)
@@ -153,14 +152,15 @@ else:
 # 🗺️ HEATMAP
 # ===============================
 if df_data is not None and uploaded_file_2:
-    # HIER WIRD DIE FINALE FUNKTION AUFGERUFEN
     df_geo = load_geo_excel_final(uploaded_file_2)
-
     st.header("🌍 Standort-Heatmap")
 
     if not df_geo.empty:
         st.success("Erfolgreich Geodaten eingelesen!")
-        st.dataframe(df_geo.head(), use_container_width=True)
+
+        # --- NEU: Vollständige Geo-Tabelle in einem Expander ---
+        with st.expander("Vollständige Geo-Tabelle anzeigen (df_geo)"):
+            st.dataframe(df_geo, use_container_width=True)
 
         time_options = ["Gesamtzeit"] + df_data['Monat'].unique().tolist()
         selected_timespan = st.selectbox("Zeitraum für Heatmap auswählen:", time_options)
@@ -178,7 +178,8 @@ if df_data is not None and uploaded_file_2:
 
         if not df_merged.empty:
             st.pydeck_chart(pdk.Deck(
-                map_style="mapbox://styles/mapbox/light-v9",
+                # --- KORREKTUR: Umstellung auf OpenStreetMap ---
+                map_style="open-street-map",
                 initial_view_state=pdk.ViewState(latitude=df_merged["Breitengrad"].mean(),
                                                  longitude=df_merged["Längengrad"].mean(), zoom=6, pitch=0),
                 layers=[
