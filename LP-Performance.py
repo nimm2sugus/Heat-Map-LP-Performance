@@ -100,13 +100,14 @@ def load_geo_excel(file):
 
         current_steuergerät = None
         ladepunkte = []
-        lon = lat = None
+        lon = None
+        lat = None
 
         for i in range(len(col_data)):
-            val = str(col_data[i]).strip().replace(",", ".")
+            val = str(col_data[i]).strip().replace(",", ".").replace("°", "")
             label = val.lower()
 
-            # Längengrad / Breitengrad
+            # Längengrad / Breitengrad erkennen
             if "längengrad" in label:
                 try:
                     lon = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
@@ -142,6 +143,8 @@ def load_geo_excel(file):
                 })
 
     geo_df = pd.DataFrame(geo_records).drop_duplicates()
+    # NaNs filtern, da pydeck sonst nicht rendert
+    geo_df = geo_df.dropna(subset=["Latitude", "Longitude"])
     return geo_df
 
 # ===============================
@@ -177,10 +180,11 @@ else:
 # ===============================
 if uploaded_file_1 and uploaded_file_2:
     df_geo = load_geo_excel(uploaded_file_2)
+
     st.subheader("🌍 Standort-Heatmap basierend auf Energiemengen")
     st.dataframe(df_geo.head(20), use_container_width=True)
 
-    if all(col in df_geo.columns for col in ["Standort", "Latitude", "Longitude"]):
+    if not df_geo.empty:
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
         df_merged = pd.merge(
             df_sum,
@@ -189,31 +193,34 @@ if uploaded_file_1 and uploaded_file_2:
             how="inner"
         )
 
-        st.pydeck_chart(pdk.Deck(
-            map_style="open-street-map",
-            initial_view_state=pdk.ViewState(
-                latitude=df_merged["Latitude"].mean(),
-                longitude=df_merged["Longitude"].mean(),
-                zoom=6,
-                pitch=0,
-            ),
-            layers=[
-                pdk.Layer(
-                    "HeatmapLayer",
-                    data=df_merged,
-                    get_position='[Longitude, Latitude]',
-                    get_weight="Energiemenge",
-                    radiusPixels=60,
-                    aggregation=pdk.types.String("SUM")
+        if not df_merged.empty:
+            st.pydeck_chart(pdk.Deck(
+                map_style="open-street-map",
+                initial_view_state=pdk.ViewState(
+                    latitude=df_merged["Latitude"].mean(),
+                    longitude=df_merged["Longitude"].mean(),
+                    zoom=6,
+                    pitch=0,
                 ),
-                pdk.Layer(
-                    "ScatterplotLayer",
-                    data=df_merged,
-                    get_position='[Longitude, Latitude]',
-                    get_radius=3000,
-                    get_fill_color='[255, 0, 0, 160]',
-                )
-            ],
-        ))
+                layers=[
+                    pdk.Layer(
+                        "HeatmapLayer",
+                        data=df_merged,
+                        get_position='[Longitude, Latitude]',
+                        get_weight="Energiemenge",
+                        radiusPixels=60,
+                        aggregation=pdk.types.String("SUM")
+                    ),
+                    pdk.Layer(
+                        "ScatterplotLayer",
+                        data=df_merged,
+                        get_position='[Longitude, Latitude]',
+                        get_radius=3000,
+                        get_fill_color='[255, 0, 0, 160]',
+                    )
+                ],
+            ))
+        else:
+            st.warning("Keine übereinstimmenden Standorte für Heatmap gefunden.")
     else:
-        st.error("Die Geo-Datei muss Spalten **'Standort'**, **'Latitude'** und **'Longitude'** enthalten.")
+        st.warning("Geo-Datei enthält keine gültigen Koordinaten für die Heatmap.")
