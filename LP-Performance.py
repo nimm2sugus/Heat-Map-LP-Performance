@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
+import re
 
 # ===============================
 # 🧭 APP KONFIGURATION
@@ -32,10 +33,8 @@ def transform_monthly_data(df):
     """
     Wandelt die LP-Tabelle in ein langes Format um.
     """
-    # Standortnamen nach unten füllen
     df["Standort"] = df["Ist in kWh"].fillna(method="ffill")
 
-    # Spalten standardisieren
     df = df.rename(columns={
         "Steuergerät ID": "Steuergerät",
         "EVSE-ID": "EVSE",
@@ -43,7 +42,6 @@ def transform_monthly_data(df):
         "YTD-Schnitt (pro Monat)": "YTD_Schnitt"
     })
 
-    # Relevante Spalten isolieren
     month_cols = [
         "Januar", "Februar", "März", "April", "Mai", "Juni",
         "Juli", "August", "September", "Oktober", "November", "Dezember"
@@ -57,11 +55,79 @@ def transform_monthly_data(df):
         value_name="Energiemenge"
     )
 
-    # Numerische Umwandlung
     df_long["Energiemenge"] = pd.to_numeric(df_long["Energiemenge"], errors="coerce")
     df_long = df_long.dropna(subset=["Energiemenge"])
 
     return df_long
+
+# ===============================
+# ⚙️ NEUE GEO-FUNKTION
+# ===============================
+@st.cache_data(show_spinner=True)
+def load_geo_excel(file):
+    """
+    Liest das 2. Excel (Geokoordinaten) ein und erstellt eine flache Tabelle:
+    Standort | Steuergerät | Ladepunkt | Longitude | Latitude
+    """
+    raw = pd.read_excel(file, header=None)
+
+    standorte = list(raw.iloc[0, 1:].dropna())
+    geo_records = []
+
+    for col_idx, standort in enumerate(standorte, start=1):
+        col_data = raw.iloc[:, [0, col_idx]].dropna(subset=[col_idx])
+        col_data.columns = ["Label", "Value"]
+        col_data["Label"] = col_data["Label"].astype(str).str.strip()
+        col_data["Value"] = col_data["Value"].astype(str).str.strip()
+
+        current_steuergerät = None
+        ladepunkte = []
+        lon = lat = None
+
+        for _, row in col_data.iterrows():
+            label = row["Label"].lower()
+            val = row["Value"]
+
+            if re.match(r"^[A-Za-z0-9]{6,}$", val) and "grad" not in label:
+                if current_steuergerät and ladepunkte:
+                    for lp in ladepunkte:
+                        geo_records.append({
+                            "Standort": standort,
+                            "Steuergerät": current_steuergerät,
+                            "Ladepunkt": lp,
+                            "Longitude": lon,
+                            "Latitude": lat
+                        })
+                current_steuergerät = val
+                ladepunkte = []
+                lon = lat = None
+
+            elif re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
+                ladepunkte.append(val)
+
+            elif "längengrad" in label:
+                try:
+                    lon = float(val.replace(",", "."))
+                except:
+                    lon = None
+            elif "breitengrad" in label:
+                try:
+                    lat = float(val.replace(",", "."))
+                except:
+                    lat = None
+
+        if current_steuergerät and ladepunkte:
+            for lp in ladepunkte:
+                geo_records.append({
+                    "Standort": standort,
+                    "Steuergerät": current_steuergerät,
+                    "Ladepunkt": lp,
+                    "Longitude": lon,
+                    "Latitude": lat
+                })
+
+    geo_df = pd.DataFrame(geo_records).drop_duplicates()
+    return geo_df
 
 # ===============================
 # 📂 SIDEBAR: Datei-Uploads
@@ -107,14 +173,15 @@ else:
 # 🗺️ HEATMAP (wenn Geo-Datei geladen)
 # ===============================
 if uploaded_file_1 and uploaded_file_2:
-    df_geo = pd.read_excel(uploaded_file_2)
+    df_geo = load_geo_excel(uploaded_file_2)
 
     st.subheader("🌍 Standort-Heatmap basierend auf Energiemengen")
     st.dataframe(df_geo.head(), use_container_width=True)
 
     if all(col in df_geo.columns for col in ["Standort", "Latitude", "Longitude"]):
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
-        df_merged = pd.merge(df_sum, df_geo, on="Standort", how="inner")
+        df_merged = pd.merge(df_sum, df_geo.groupby("Standort")[["Latitude", "Longitude"]].first().reset_index(),
+                             on="Standort", how="inner")
 
         st.pydeck_chart(pdk.Deck(
             map_style="mapbox://styles/mapbox/light-v9",
