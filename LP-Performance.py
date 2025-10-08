@@ -75,24 +75,24 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ GEO-FUNKTION
+# ⚙️ ROBUSTE GEO-FUNKTION
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
     raw = pd.read_excel(file, header=None)
-    labels = raw.iloc[:, 0].astype(str).str.strip()  # erste Spalte = Labels
-    standorte = raw.columns[1:]  # alle anderen Spalten = Standorte
+    labels = raw.iloc[:, 0].astype(str).str.strip()  # Spalte A = Labels
+    standorte = raw.columns[1:]  # Spalten B…Z = Standorte
 
     geo_records = []
 
     for col_idx, standort in enumerate(standorte, start=1):
         col_values = raw.iloc[:, col_idx]
+
         current_steuergerät = None
         laengengrad = None
         breitengrad = None
         ladepunkte = []
 
-        # Durch alle Zeilen gehen
         for i, val in enumerate(col_values):
             val = str(val).strip().replace(",", ".").replace("°", "")
             label = labels[i]
@@ -102,9 +102,8 @@ def load_geo_excel(file):
                 ladepunkte = []
                 continue
 
-            if label == "Ladepunkt":
-                if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
-                    ladepunkte.append(val)
+            if label == "Ladepunkt" and re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
+                ladepunkte.append(val)
                 continue
 
             if label == "Längengrad":
@@ -121,7 +120,7 @@ def load_geo_excel(file):
                     breitengrad = None
                 continue
 
-        # alle Ladepunkte abspeichern
+        # Alle Ladepunkte abspeichern
         if current_steuergerät and ladepunkte:
             for lp in ladepunkte:
                 geo_records.append({
