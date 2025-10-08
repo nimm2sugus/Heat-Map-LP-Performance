@@ -63,7 +63,7 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ ROBUSTE GEO-FUNKTION (mehrere Steuergeräte pro Standort)
+# ⚙️ ROBUSTE GEO-FUNKTION (mehrere Steuergeräte pro Standort, Labels in Spalte A)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
@@ -85,9 +85,8 @@ def load_geo_excel(file):
             val = str(val).strip().replace(",", ".").replace("°", "")
             label = labels[i]
 
-            # Neues Steuergerät starten
             if label == "Steuergerät" and val:
-                # Vorherige Ladepunkte speichern
+                # vorherige Ladepunkte speichern
                 if current_steuergerät and ladepunkte:
                     for lp in ladepunkte:
                         geo_records.append({
@@ -97,19 +96,17 @@ def load_geo_excel(file):
                             "Längengrad": laengengrad,
                             "Breitengrad": breitengrad
                         })
-                # Neues Steuergerät initialisieren
+                # neues Steuergerät initialisieren
                 current_steuergerät = val
                 ladepunkte = []
                 laengengrad = None
                 breitengrad = None
                 continue
 
-            # Ladepunkt sammeln
             if label == "Ladepunkt" and re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
                 ladepunkte.append(val)
                 continue
 
-            # Koordinaten speichern
             if label == "Längengrad":
                 try:
                     laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
@@ -124,7 +121,7 @@ def load_geo_excel(file):
                     breitengrad = None
                 continue
 
-        # Letzte Ladepunkte speichern
+        # letzte Ladepunkte speichern
         if current_steuergerät and ladepunkte:
             for lp in ladepunkte:
                 geo_records.append({
@@ -136,6 +133,10 @@ def load_geo_excel(file):
                 })
 
     geo_df = pd.DataFrame(geo_records)
+    # Sicherstellen, dass die Spalten existieren
+    for col in ["Breitengrad", "Längengrad"]:
+        if col not in geo_df.columns:
+            geo_df[col] = None
     geo_df = geo_df.dropna(subset=["Breitengrad", "Längengrad"])
     return geo_df
 
