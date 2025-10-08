@@ -24,22 +24,23 @@ Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt:
 # ===============================
 # ⚙️ HELPER FÜR DYNAMISCHES HEADER-FINDEN
 # ===============================
-def find_header_row(file, expected_columns):
+def find_header_row(file, required_columns):
     """
-    Sucht die Zeile, die die erwarteten Spaltennamen enthält.
+    Sucht die Zeile, die mindestens alle required_columns enthält.
     Gibt die Zeilennummer zurück, die als Header genutzt werden soll.
     """
     raw = pd.read_excel(file, header=None)
     for i, row in raw.iterrows():
-        if all(any(str(col).strip() == exp for col in row) for exp in expected_columns):
+        row_values = [str(col).strip() for col in row]
+        if all(req in row_values for req in required_columns):
             return i, raw
-    raise ValueError("Keine passende Header-Zeile gefunden.")
+    raise ValueError(f"Keine passende Header-Zeile gefunden. Erwartete Spalten: {required_columns}")
 
-def load_excel_dynamic(file, expected_columns):
+def load_excel_dynamic(file, required_columns):
     """
     Liest eine Excel-Datei, sucht dynamisch die Header-Zeile und lädt die Daten ab dieser Zeile.
     """
-    header_row, _ = find_header_row(file, expected_columns)
+    header_row, _ = find_header_row(file, required_columns)
     df = pd.read_excel(file, header=header_row)
     return df
 
@@ -93,15 +94,13 @@ def transform_monthly_data(df):
 def load_geo_excel(file):
     """
     Liest Geo-Excel mit dynamischem Header.
-    Die Header-Zeile wird gesucht, danach werden alle Spalten als Standorte verarbeitet.
+    Header-Zeile wird gesucht, danach werden alle Spalten als Standorte verarbeitet.
     """
-    # Wir erwarten mindestens "Label" + einen Standort
-    expected_columns = ["Label"]
-    header_row, raw = find_header_row(file, expected_columns)
+    required_columns = ["Label"]  # Pflichtspalte
+    header_row, _ = find_header_row(file, required_columns)
     df_raw = pd.read_excel(file, header=header_row)
 
     geo_records = []
-
     for col_idx in range(1, df_raw.shape[1]):
         standort = str(df_raw.columns[col_idx]).strip()
         if not standort or standort.lower() == "nan":
