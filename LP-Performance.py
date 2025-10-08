@@ -48,7 +48,6 @@ def load_excel(file):
 @st.cache_data(show_spinner=True)
 def transform_monthly_data(df):
     df["Standort"] = df["Ist in kWh"].fillna(method="ffill")
-
     df = df.rename(columns={
         "Steuergerät ID": "Steuergerät",
         "EVSE-ID": "EVSE",
@@ -71,19 +70,17 @@ def transform_monthly_data(df):
 
     df_long["Energiemenge"] = pd.to_numeric(df_long["Energiemenge"], errors="coerce")
     df_long = df_long.dropna(subset=["Energiemenge"])
-
     df_long["Monat"] = pd.Categorical(df_long["Monat"], categories=month_order, ordered=True)
     df_long = df_long.sort_values(["Standort", "Monat"])
     return df_long
 
 # ===============================
-# ⚙️ GEO-FUNKTION (robust, alle Standorte, Steuergerät Korrektur)
+# ⚙️ GEO-FUNKTION (Spalten = Standorte)
 # ===============================
 def find_geo_header_row(file):
     raw = pd.read_excel(file, header=None)
     for i, row in raw.iterrows():
-        first_col = str(row[0]).strip() if pd.notna(row[0]) else ""
-        if first_col and "grad" not in first_col.lower():
+        if any(str(c).strip() for c in row):
             return i
     raise ValueError("Keine passende Header-Zeile für Geo-Datei gefunden.")
 
@@ -94,43 +91,44 @@ def load_geo_excel(file):
 
     geo_records = []
 
-    for col_idx in range(1, df_raw.shape[1]):  # alle Standorte ab Spalte 2
+    for col_idx in range(df_raw.shape[1]):  # jede Spalte = Standort
         standort = str(df_raw.columns[col_idx]).strip()
         if not standort or standort.lower() == "nan":
             continue
 
-        col_data = df_raw.iloc[:, [0, col_idx]].dropna(subset=[df_raw.columns[col_idx]])
-        col_data.columns = ["Label", "Value"]
-        col_data["Label"] = col_data["Label"].astype(str).str.strip()
-        col_data["Value"] = col_data["Value"].astype(str).str.strip()
+        col_data = df_raw.iloc[:, col_idx].dropna().reset_index(drop=True)
 
         current_steuergerät = None
         ladepunkte = []
         lon = lat = None
 
-        # Wir nehmen Steuergerät eine Zeile oberhalb der Ladepunkte
         for i in range(len(col_data)):
-            label = col_data.iloc[i]["Label"].lower()
-            val = col_data.iloc[i]["Value"]
+            val = str(col_data[i]).strip().replace(",", ".")
+            label = val.lower()
 
-            if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):  # Ladepunkt
-                # Steuergerät aus vorheriger Zeile
-                if i > 0:
-                    prev_val = col_data.iloc[i - 1]["Value"]
-                    if re.match(r"^[A-Za-z0-9]{6,}$", prev_val):
-                        current_steuergerät = prev_val
-                ladepunkte.append(val)
-
-            elif "längengrad" in label:
+            # Längengrad / Breitengrad
+            if "längengrad" in label:
                 try:
-                    lon = float(val.replace(",", "."))
+                    lon = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
                     lon = None
+                continue
             elif "breitengrad" in label:
                 try:
-                    lat = float(val.replace(",", "."))
+                    lat = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
                     lat = None
+                continue
+
+            # Steuergerät
+            if re.match(r"^[A-Za-z0-9]{6,}$", val):
+                current_steuergerät = val
+                ladepunkte = []
+                continue
+
+            # Ladepunkte
+            if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
+                ladepunkte.append(val)
 
         # alle Ladepunkte abspeichern
         if current_steuergerät and ladepunkte:
@@ -150,18 +148,8 @@ def load_geo_excel(file):
 # 📂 SIDEBAR: Datei-Uploads
 # ===============================
 st.sidebar.header("📂 Datenquellen")
-
-uploaded_file_1 = st.sidebar.file_uploader(
-    "Lade Monatsdaten (Test LP-Tool.xlsx)",
-    type=["xlsx"],
-    key="file1"
-)
-
-uploaded_file_2 = st.sidebar.file_uploader(
-    "Lade Geokoordinaten (z. B. 2025 06 25 - LS-Geokoordinaten.xlsx)",
-    type=["xlsx"],
-    key="file2"
-)
+uploaded_file_1 = st.sidebar.file_uploader("Lade Monatsdaten (Test LP-Tool.xlsx)", type=["xlsx"], key="file1")
+uploaded_file_2 = st.sidebar.file_uploader("Lade Geokoordinaten (LS-Geokoordinaten.xlsx)", type=["xlsx"], key="file2")
 
 # ===============================
 # 📈 ANZEIGE DER MONATSDATEN
@@ -175,7 +163,6 @@ if uploaded_file_1:
 
     standorte = sorted(df_data["Standort"].dropna().unique())
     selected_standort = st.selectbox("Standort auswählen:", standorte)
-
     df_filtered = df_data[df_data["Standort"] == selected_standort]
 
     st.markdown(f"**Anzahl Ladepunkte:** {df_filtered['EVSE'].nunique()} | **Steuergeräte:** {df_filtered['Steuergerät'].nunique()}")
@@ -186,13 +173,12 @@ else:
     st.info("Bitte zuerst die Datei **Test LP-Tool.xlsx** hochladen.")
 
 # ===============================
-# 🗺️ HEATMAP (wenn Geo-Datei geladen)
+# 🗺️ HEATMAP
 # ===============================
 if uploaded_file_1 and uploaded_file_2:
     df_geo = load_geo_excel(uploaded_file_2)
-
     st.subheader("🌍 Standort-Heatmap basierend auf Energiemengen")
-    st.dataframe(df_geo.head(20), use_container_width=True)  # alle Standorte sichtbar
+    st.dataframe(df_geo.head(20), use_container_width=True)
 
     if all(col in df_geo.columns for col in ["Standort", "Latitude", "Longitude"]):
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
@@ -204,7 +190,7 @@ if uploaded_file_1 and uploaded_file_2:
         )
 
         st.pydeck_chart(pdk.Deck(
-            map_style="open-street-map",  # Hintergrundkarte korrekt
+            map_style="open-street-map",
             initial_view_state=pdk.ViewState(
                 latitude=df_merged["Latitude"].mean(),
                 longitude=df_merged["Longitude"].mean(),
