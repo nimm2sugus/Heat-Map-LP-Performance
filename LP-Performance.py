@@ -18,7 +18,7 @@ st.set_page_config(
 # ===============================
 # Ersetzen Sie "DEIN_KEY_HIER" durch Ihren kostenlosen Key von https://www.mapbox.com
 # für die zuverlässigste Kartendarstellung.
-MAPBOX_API_KEY = "DEIN_KEY_HIER"
+MAPBOX_API_KEY = "pk.eyJ1IjoibmltbTJzdWd1cyIsImEiOiJjbWdoeGMwbzEwMWN6MmpxeHNuOWtwb2N5In0.Y0VtWicxzoEvUcxdsLh9sQ"
 
 st.title("🔋 LP-Tool Dashboard – Standortanalyse & Heatmap")
 st.markdown(
