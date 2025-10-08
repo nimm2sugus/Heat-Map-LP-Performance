@@ -61,14 +61,10 @@ def transform_monthly_data(df):
 
 
 # ===============================
-# ⚙️ KORRIGIERTE GEO-FUNKTION (KOORDINATEN GELTEN PRO STEUERGERÄT-BLOCK)
+# ⚙️ GEO-FUNKTION (BLOCKWEISE MIT SPEICHERUNG AM SPALTENENDE)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
-    """
-    Liest Geo-Daten blockweise. Geht davon aus, dass Längen-/Breitengrad
-    zu dem darüberliegenden Steuergerät-Block gehören.
-    """
     raw = pd.read_excel(file, header=None)
     header_row_index = -1
     for i in range(min(10, len(raw))):
@@ -96,6 +92,7 @@ def load_geo_excel(file):
         laengengrad = None
         breitengrad = None
 
+        # Iteriere durch alle Zeilen einer Spalte
         for i, val in enumerate(col_values):
             if pd.isna(val) or i >= len(labels):
                 continue
@@ -103,59 +100,39 @@ def load_geo_excel(file):
             val_str = str(val).strip()
             label = labels[i]
 
-            # Ein neues Steuergerät beendet den vorherigen Block und startet einen neuen.
             if label == "Steuergerät" and val_str:
-                # Speichere den vorherigen Block, WENN er vollständig ist.
                 if current_steuergerät and ladepunkte and laengengrad is not None and breitengrad is not None:
                     for lp in ladepunkte:
-                        geo_records.append({
-                            "Standort": str(standort_name),
-                            "Steuergerät": current_steuergerät,
-                            "EVSE-ID": lp,
-                            "Längengrad": laengengrad,
-                            "Breitengrad": breitengrad
-                        })
+                        geo_records.append(
+                            {"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
+                             "Längengrad": laengengrad, "Breitengrad": breitengrad})
 
-                # --- VOLLSTÄNDIGER RESET für den neuen Block ---
                 current_steuergerät = val_str
                 ladepunkte = []
                 laengengrad = None
                 breitengrad = None
                 continue
 
-            # Sammle die Daten für den aktuellen Block
             if label == "EVSE-ID" and re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val_str, re.IGNORECASE):
                 ladepunkte.append(val_str)
-                continue
-
-            if label == "Längengrad" and val_str:
+            elif label == "Längengrad" and val_str:
                 try:
-                    val_clean = val_str.replace(",", ".").replace("°", "").strip()
-                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_clean)
+                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())
                     laengengrad = float(matches[0]) if matches else None
                 except (ValueError, IndexError):
                     laengengrad = None
-                continue
-
-            if label == "Breitengrad" and val_str:
+            elif label == "Breitengrad" and val_str:
                 try:
-                    val_clean = val_str.replace(",", ".").replace("°", "").strip()
-                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_clean)
+                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())
                     breitengrad = float(matches[0]) if matches else None
                 except (ValueError, IndexError):
                     breitengrad = None
-                continue
 
-        # Speichere den allerletzten Block in der Spalte nach der Schleife.
+        # <-- HIER PASSIERT DIE "SCHLUSS-SPEICHERUNG" FÜR DEN LETZTEN BLOCK DER SPALTE
         if current_steuergerät and ladepunkte and laengengrad is not None and breitengrad is not None:
             for lp in ladepunkte:
-                geo_records.append({
-                    "Standort": str(standort_name),
-                    "Steuergerät": current_steuergerät,
-                    "EVSE-ID": lp,
-                    "Längengrad": laengengrad,
-                    "Breitengrad": breitengrad
-                })
+                geo_records.append({"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
+                                    "Längengrad": laengengrad, "Breitengrad": breitengrad})
 
     geo_df = pd.DataFrame(geo_records)
 
@@ -203,20 +180,13 @@ if df_data is not None and uploaded_file_2:
         st.markdown("Erfolgreich eingelesene Geodaten (Auszug):")
         st.dataframe(df_geo.head(20), use_container_width=True)
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
-        # WICHTIG: Pro Standort wird für die Heatmap die ERSTE gefundene Koordinate verwendet.
-        # Wenn mehrere Steuergeräte pro Standort unterschiedliche Koordinaten haben,
-        # könnte eine Aggregation (z.B. Mittelwert) hier sinnvoll sein.
         df_geo_unique = df_geo.groupby("Standort")[["Breitengrad", "Längengrad"]].first().reset_index()
         df_merged = pd.merge(df_sum, df_geo_unique, on="Standort", how="inner")
         if not df_merged.empty:
             st.pydeck_chart(pdk.Deck(
                 map_style="mapbox://styles/mapbox/light-v9",
-                initial_view_state=pdk.ViewState(
-                    latitude=df_merged["Breitengrad"].mean(),
-                    longitude=df_merged["Längengrad"].mean(),
-                    zoom=6,
-                    pitch=0,
-                ),
+                initial_view_state=pdk.ViewState(latitude=df_merged["Breitengrad"].mean(),
+                                                 longitude=df_merged["Längengrad"].mean(), zoom=6, pitch=0),
                 layers=[
                     pdk.Layer("HeatmapLayer", data=df_merged, get_position='[Längengrad, Breitengrad]',
                               get_weight="Energiemenge", radiusPixels=60, aggregation=pdk.types.String("SUM")),
