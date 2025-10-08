@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 # ===============================
-# 🔑 TOKEN-KONFIGURATION (Optional, aber empfohlen)
+# 🔑 TOKEN-KONFIGURATION (Optional)
 # ===============================
 MAPBOX_API_KEY = "pk.eyJ1IjoibmltbTJzdWd1cyIsImEiOiJjbWdoeGMwbzEwMWN6MmpxeHNuOWtwb2N5In0.Y0VtWicxzoEvUcxdsLh9sQ"
 
@@ -132,8 +132,6 @@ else:
 
 if df_data is not None and not df_data.empty:
     st.header("📊 Monatliche Gesamtenergiemenge (Alle Standorte)")
-
-    # --- NEU: Ein großes Diagramm für alle Standorte ---
     df_chart_total = df_data.groupby("Monat")["Energiemenge"].sum().reset_index()
     st.bar_chart(df_chart_total, x="Monat", y="Energiemenge", use_container_width=True)
 
@@ -143,8 +141,14 @@ if df_data is not None and not df_data.empty:
 if df_data is not None and df_geo is not None and not df_geo.empty:
     st.header("🌍 Interaktive Heatmap (Alle Standorte)")
 
-    time_options = ["Gesamtzeit"] + df_data['Monat'].unique().tolist()
-    selected_timespan = st.selectbox("Zeitraum für Heatmap auswählen:", time_options)
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        time_options = ["Gesamtzeit"] + df_data['Monat'].unique().tolist()
+        selected_timespan = st.selectbox("Zeitraum für Heatmap auswählen:", time_options)
+
+    with col2:
+        swap_coords = st.checkbox("Längen-/Breitengrad tauschen",
+                                  help="Aktivieren, falls die Punkte am falschen Ort auf der Weltkarte erscheinen.")
 
     if selected_timespan == "Gesamtzeit":
         df_sum = df_data.groupby(["Standort", "Steuergerät"])["Energiemenge"].sum().reset_index()
@@ -155,34 +159,38 @@ if df_data is not None and df_geo is not None and not df_geo.empty:
     df_geo_unique = df_geo.groupby(["Standort", "Steuergerät"])[["Breitengrad", "Längengrad"]].first().reset_index()
     df_merged = pd.merge(df_sum, df_geo_unique, on=["Standort", "Steuergerät"], how="inner")
 
-    if not df_merged.empty:
-        # --- NEU: Standort-Marker werden immer für alle Standorte erstellt ---
-        df_standort_marker = df_merged.groupby('Standort').agg(
-            Breitengrad=('Breitengrad', 'mean'),
-            Längengrad=('Längengrad', 'mean')
-        ).reset_index()
+    if swap_coords:
+        df_merged = df_merged.rename(columns={"Längengrad": "temp", "Breitengrad": "Längengrad"})
+        df_merged = df_merged.rename(columns={"temp": "Breitengrad"})
+        st.info("Längengrad und Breitengrad wurden für die Darstellung vertauscht.")
 
+    if not df_merged.empty:
         use_mapbox = MAPBOX_API_KEY != "DEIN_KEY_HIER" and MAPBOX_API_KEY != ""
 
         st.pydeck_chart(pdk.Deck(
             map_provider="mapbox" if use_mapbox else None,
             map_style=pdk.map_styles.SATELLITE if use_mapbox else 'open-street-map',
             api_keys={'mapbox': MAPBOX_API_KEY} if use_mapbox else None,
-            # Startansicht zeigt alle Daten
             initial_view_state=pdk.ViewState(latitude=df_merged["Breitengrad"].mean(),
                                              longitude=df_merged["Längengrad"].mean(), zoom=5, pitch=45),
             layers=[
                 pdk.Layer("HeatmapLayer", data=df_merged, get_position='[Längengrad, Breitengrad]',
                           get_weight="Energiemenge", radiusPixels=80),
-                pdk.Layer("ScatterplotLayer", data=df_merged, get_position='[Längengrad, Breitengrad]', get_radius=100,
-                          get_fill_color='[255, 140, 0, 100]', pickable=True),
-                # Die Text-Ebene zeigt die Standortnamen
-                pdk.Layer("TextLayer", data=df_standort_marker, get_position='[Längengrad, Breitengrad]',
-                          get_text='Standort', get_size=16, get_color='[255, 255, 255]',
-                          get_background_color='[0, 0, 0, 120]', background=True)
+                # --- KORREKTUR: Visuelle Präzision erhöht ---
+                pdk.Layer(
+                    "ScatterplotLayer",
+                    data=df_merged,
+                    get_position='[Längengrad, Breitengrad]',
+                    get_radius=50,  # Radius auf 50 Meter reduziert für einen präzisen Punkt
+                    get_fill_color='[255, 140, 0, 150]',  # Leuchtendes Orange
+                    get_line_color='[255, 255, 255]',  # Weißer Rand
+                    line_width_min_pixels=1,
+                    pickable=True
+                )
             ],
+            # --- KORREKTUR: Tooltip um exakte Koordinaten erweitert ---
             tooltip={
-                "html": "<b>Standort:</b> {Standort}<br/><b>Steuergerät:</b> {Steuergerät}<br/><b>Energiemenge:</b> {Energiemenge} kWh",
+                "html": "<b>Standort:</b> {Standort}<br/><b>Steuergerät:</b> {Steuergerät}<br/><b>Energiemenge:</b> {Energiemenge} kWh<br/><b>Koordinaten:</b> [{Längengrad}, {Breitengrad}]",
                 "style": {"backgroundColor": "steelblue", "color": "white"}}
         ))
     else:
