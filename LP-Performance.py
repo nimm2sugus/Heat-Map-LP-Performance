@@ -31,7 +31,7 @@ def load_excel(file):
 @st.cache_data(show_spinner=True)
 def transform_monthly_data(df):
     """
-    Wandelt die LP-Tabelle in ein langes Format um.
+    Wandelt die LP-Tabelle in ein langes Format um und sortiert Monate korrekt.
     """
     df["Standort"] = df["Ist in kWh"].fillna(method="ffill")
 
@@ -42,7 +42,7 @@ def transform_monthly_data(df):
         "YTD-Schnitt (pro Monat)": "YTD_Schnitt"
     })
 
-    month_cols = [
+    month_order = [
         "Januar", "Februar", "März", "April", "Mai", "Juni",
         "Juli", "August", "September", "Oktober", "November", "Dezember"
     ]
@@ -50,13 +50,17 @@ def transform_monthly_data(df):
 
     df_long = df.melt(
         id_vars=id_cols,
-        value_vars=[c for c in month_cols if c in df.columns],
+        value_vars=[c for c in month_order if c in df.columns],
         var_name="Monat",
         value_name="Energiemenge"
     )
 
     df_long["Energiemenge"] = pd.to_numeric(df_long["Energiemenge"], errors="coerce")
     df_long = df_long.dropna(subset=["Energiemenge"])
+
+    # Monat als kategorische Variable setzen, damit sortiert nach Kalender
+    df_long["Monat"] = pd.Categorical(df_long["Monat"], categories=month_order, ordered=True)
+    df_long = df_long.sort_values(["Standort", "Monat"])
 
     return df_long
 
@@ -66,16 +70,17 @@ def transform_monthly_data(df):
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
     """
-    Liest das 2. Excel (Geokoordinaten) ein und erstellt eine flache Tabelle:
-    Standort | Steuergerät | Ladepunkt | Longitude | Latitude
+    Liest das Geo-Excel ein und erstellt eine flache Tabelle für alle Standorte.
     """
     raw = pd.read_excel(file, header=None)
-
-    standorte = list(raw.iloc[0, 1:].dropna())
     geo_records = []
 
-    for col_idx, standort in enumerate(standorte, start=1):
-        col_data = raw.iloc[:, [0, col_idx]].dropna(subset=[col_idx])
+    # Jede Spalte ab 1 (erste Spalte = Labels)
+    for col_idx in range(1, raw.shape[1]):
+        standort = str(raw.iloc[0, col_idx]).strip()
+        if not standort or standort.lower() == "nan":
+            continue
+        col_data = raw.iloc[1:, [0, col_idx]].dropna(subset=[col_idx])
         col_data.columns = ["Label", "Value"]
         col_data["Label"] = col_data["Label"].astype(str).str.strip()
         col_data["Value"] = col_data["Value"].astype(str).str.strip()
