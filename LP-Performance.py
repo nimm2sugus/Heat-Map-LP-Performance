@@ -75,66 +75,57 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ GEO-FUNKTION (Spalten = Standorte)
+# ⚙️ GEO-FUNKTION (erste Spalte = Labels, andere Spalten = Standorte)
 # ===============================
-def find_geo_header_row(file):
-    raw = pd.read_excel(file, header=None)
-    for i, row in raw.iterrows():
-        if any(str(c).strip() for c in row):
-            return i
-    raise ValueError("Keine passende Header-Zeile für Geo-Datei gefunden.")
-
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
-    header_row = find_geo_header_row(file)
-    df_raw = pd.read_excel(file, header=header_row)
+    raw = pd.read_excel(file, header=None)
+    labels = raw.iloc[:, 0].astype(str).str.strip()
+    standorte = raw.columns[1:]
 
     geo_records = []
 
-    for col_idx in range(df_raw.shape[1]):  # jede Spalte = Standort
-        standort = str(df_raw.columns[col_idx]).strip()
-        if not standort or standort.lower() == "nan":
-            continue
-
-        col_data = df_raw.iloc[:, col_idx].dropna().reset_index(drop=True)
-
+    for col_idx, standort in enumerate(standorte, start=1):
+        col_values = raw.iloc[:, col_idx]
         current_steuergerät = None
         ladepunkte = []
         laengengrad = None
         breitengrad = None
 
-        for i in range(len(col_data)):
-            val = str(col_data[i]).strip().replace(",", ".").replace("°", "")
+        for i, val in enumerate(col_values):
+            val = str(val).strip().replace(",", ".").replace("°", "")
+            label = labels[i]
 
-            # Längengrad / Breitengrad: erster Buchstabe groß, exakt so wie in Excel
-            if val.startswith("Längengrad"):
+            # Steuergerät erkennen
+            if re.match(r"^[A-Za-z0-9]{6,}$", val):
+                current_steuergerät = val
+                ladepunkte = []
+                continue
+
+            # Ladepunkte erkennen
+            if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
+                ladepunkte.append(val)
+                continue
+
+            # Längengrad / Breitengrad erkennen (Labels: erster Buchstabe groß)
+            if label == "Längengrad":
                 try:
                     laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
                     laengengrad = None
                 continue
-            elif val.startswith("Breitengrad"):
+            elif label == "Breitengrad":
                 try:
                     breitengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
                     breitengrad = None
                 continue
 
-            # Steuergerät
-            if re.match(r"^[A-Za-z0-9]{6,}$", val):
-                current_steuergerät = val
-                ladepunkte = []
-                continue
-
-            # Ladepunkte
-            if re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
-                ladepunkte.append(val)
-
         # alle Ladepunkte abspeichern
         if current_steuergerät and ladepunkte:
             for lp in ladepunkte:
                 geo_records.append({
-                    "Standort": standort,
+                    "Standort": str(standort),
                     "Steuergerät": current_steuergerät,
                     "Ladepunkt": lp,
                     "Längengrad": laengengrad,
