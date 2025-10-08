@@ -100,8 +100,8 @@ def load_geo_excel(file):
 
         current_steuergerät = None
         ladepunkte = []
-        lon = None
-        lat = None
+        laengengrad = None
+        breitengrad = None
 
         for i in range(len(col_data)):
             val = str(col_data[i]).strip().replace(",", ".").replace("°", "")
@@ -110,15 +110,15 @@ def load_geo_excel(file):
             # Längengrad / Breitengrad erkennen
             if "längengrad" in label:
                 try:
-                    lon = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
+                    laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
-                    lon = None
+                    laengengrad = None
                 continue
             elif "breitengrad" in label:
                 try:
-                    lat = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
+                    breitengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
-                    lat = None
+                    breitengrad = None
                 continue
 
             # Steuergerät
@@ -138,13 +138,13 @@ def load_geo_excel(file):
                     "Standort": standort,
                     "Steuergerät": current_steuergerät,
                     "Ladepunkt": lp,
-                    "Longitude": lon,
-                    "Latitude": lat
+                    "Längengrad": laengengrad,
+                    "Breitengrad": breitengrad
                 })
 
     geo_df = pd.DataFrame(geo_records).drop_duplicates()
     # NaNs filtern, da pydeck sonst nicht rendert
-    geo_df = geo_df.dropna(subset=["Latitude", "Longitude"])
+    geo_df = geo_df.dropna(subset=["Breitengrad", "Längengrad"])
     return geo_df
 
 # ===============================
@@ -188,7 +188,7 @@ if uploaded_file_1 and uploaded_file_2:
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
         df_merged = pd.merge(
             df_sum,
-            df_geo.groupby("Standort")[["Latitude", "Longitude"]].first().reset_index(),
+            df_geo.groupby("Standort")[["Breitengrad", "Längengrad"]].first().reset_index(),
             on="Standort",
             how="inner"
         )
@@ -197,8 +197,8 @@ if uploaded_file_1 and uploaded_file_2:
             st.pydeck_chart(pdk.Deck(
                 map_style="open-street-map",
                 initial_view_state=pdk.ViewState(
-                    latitude=df_merged["Latitude"].mean(),
-                    longitude=df_merged["Longitude"].mean(),
+                    latitude=df_merged["Breitengrad"].mean(),
+                    longitude=df_merged["Längengrad"].mean(),
                     zoom=6,
                     pitch=0,
                 ),
@@ -206,7 +206,7 @@ if uploaded_file_1 and uploaded_file_2:
                     pdk.Layer(
                         "HeatmapLayer",
                         data=df_merged,
-                        get_position='[Longitude, Latitude]',
+                        get_position='[Längengrad, Breitengrad]',
                         get_weight="Energiemenge",
                         radiusPixels=60,
                         aggregation=pdk.types.String("SUM")
@@ -214,7 +214,7 @@ if uploaded_file_1 and uploaded_file_2:
                     pdk.Layer(
                         "ScatterplotLayer",
                         data=df_merged,
-                        get_position='[Longitude, Latitude]',
+                        get_position='[Längengrad, Breitengrad]',
                         get_radius=3000,
                         get_fill_color='[255, 0, 0, 160]',
                     )
