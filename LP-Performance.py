@@ -22,16 +22,39 @@ Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt:
 """)
 
 # ===============================
+# ⚙️ HELPER FÜR DYNAMISCHES HEADER-FINDEN
+# ===============================
+def find_header_row(file, expected_columns):
+    """
+    Sucht die Zeile, die die erwarteten Spaltennamen enthält.
+    Gibt die Zeilennummer zurück, die als Header genutzt werden soll.
+    """
+    raw = pd.read_excel(file, header=None)
+    for i, row in raw.iterrows():
+        if all(any(str(col).strip() == exp for col in row) for exp in expected_columns):
+            return i, raw
+    raise ValueError("Keine passende Header-Zeile gefunden.")
+
+def load_excel_dynamic(file, expected_columns):
+    """
+    Liest eine Excel-Datei, sucht dynamisch die Header-Zeile und lädt die Daten ab dieser Zeile.
+    """
+    header_row, _ = find_header_row(file, expected_columns)
+    df = pd.read_excel(file, header=header_row)
+    return df
+
+# ===============================
 # ⚙️ CACHING
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_excel(file):
-    return pd.read_excel(file, header=1)  # Zeile 2 ist Kopfzeile
+    expected_cols = ["Steuergerät ID", "EVSE-ID", "Ist in kWh", "YTD-Summe", "YTD-Schnitt (pro Monat)"]
+    return load_excel_dynamic(file, expected_cols)
 
 @st.cache_data(show_spinner=True)
 def transform_monthly_data(df):
     """
-    Wandelt die LP-Tabelle in ein langes Format um und sortiert Monate korrekt.
+    Wandelt die LP-Tabelle in langes Format um und sortiert Monate korrekt.
     """
     df["Standort"] = df["Ist in kWh"].fillna(method="ffill")
 
@@ -58,31 +81,33 @@ def transform_monthly_data(df):
     df_long["Energiemenge"] = pd.to_numeric(df_long["Energiemenge"], errors="coerce")
     df_long = df_long.dropna(subset=["Energiemenge"])
 
-    # Monat als kategorische Variable setzen, damit sortiert nach Kalender
     df_long["Monat"] = pd.Categorical(df_long["Monat"], categories=month_order, ordered=True)
     df_long = df_long.sort_values(["Standort", "Monat"])
 
     return df_long
 
 # ===============================
-# ⚙️ GEO-FUNKTION (alle Standorte, korrektes Mapping)
+# ⚙️ GEO-FUNKTION (dynamisch Header)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
     """
-    Liest das Geo-Excel ein und erstellt eine flache Tabelle für alle Standorte.
-    Korrigiert die Zeilenverschiebung für Standort und Steuergeräte.
+    Liest Geo-Excel mit dynamischem Header.
+    Die Header-Zeile wird gesucht, danach werden alle Spalten als Standorte verarbeitet.
     """
-    raw = pd.read_excel(file, header=None)
+    # Wir erwarten mindestens "Label" + einen Standort
+    expected_columns = ["Label"]
+    header_row, raw = find_header_row(file, expected_columns)
+    df_raw = pd.read_excel(file, header=header_row)
+
     geo_records = []
 
-    # Jede Spalte ab 1 (erste Spalte = Labels)
-    for col_idx in range(1, raw.shape[1]):
-        standort = str(raw.iloc[1, col_idx]).strip()  # Standortname in Zeile 2
+    for col_idx in range(1, df_raw.shape[1]):
+        standort = str(df_raw.columns[col_idx]).strip()
         if not standort or standort.lower() == "nan":
             continue
 
-        col_data = raw.iloc[2:, [0, col_idx]].dropna(subset=[col_idx])  # ab Zeile 3: Labels & Werte
+        col_data = df_raw.iloc[:, [0, col_idx]].dropna(subset=[df_raw.columns[col_idx]])
         col_data.columns = ["Label", "Value"]
         col_data["Label"] = col_data["Label"].astype(str).str.strip()
         col_data["Value"] = col_data["Value"].astype(str).str.strip()
@@ -172,7 +197,6 @@ if uploaded_file_1:
 
     df_chart = df_filtered.groupby("Monat")["Energiemenge"].sum().reset_index()
     st.bar_chart(df_chart, x="Monat", y="Energiemenge", use_container_width=True)
-
 else:
     st.info("Bitte zuerst die Datei **Test LP-Tool.xlsx** hochladen.")
 
@@ -186,7 +210,6 @@ if uploaded_file_1 and uploaded_file_2:
     st.dataframe(df_geo.head(), use_container_width=True)
 
     if all(col in df_geo.columns for col in ["Standort", "Latitude", "Longitude"]):
-        # Summe pro Standort
         df_sum = df_data.groupby("Standort")["Energiemenge"].sum().reset_index()
         df_merged = pd.merge(
             df_sum,
@@ -196,7 +219,7 @@ if uploaded_file_1 and uploaded_file_2:
         )
 
         st.pydeck_chart(pdk.Deck(
-            map_style="open-street-map",  # OpenStreetMap ohne Token
+            map_style="open-street-map",
             initial_view_state=pdk.ViewState(
                 latitude=df_merged["Latitude"].mean(),
                 longitude=df_merged["Longitude"].mean(),
