@@ -13,17 +13,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- KORREKTUR 2: HIER IHREN MAPBOX KEY EINFÜGEN ---
-# Holen Sie sich Ihren kostenlosen Key von https://www.mapbox.com
-# Ersetzen Sie "DEIN_KEY_HIER" durch Ihren kopierten "public token"
-MAPBOX_API_KEY = "DEIN_KEY_HIER" 
-# ----------------------------------------------------
-
-if MAPBOX_API_KEY == "DEIN_KEY_HIER":
-    st.warning("WARNUNG: Sie haben noch keinen Mapbox API Key eingefügt. Die Hintergrundkarte wird möglicherweise nicht angezeigt. Bitte fügen Sie den Key im Skript ein.")
-
 st.title("🔋 LP-Tool Dashboard – Standortanalyse & Heatmap")
-st.markdown("Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt Diagramme und eine geografische Heatmap.")
+st.markdown(
+    "Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt Diagramme und eine geografische Heatmap.")
+
 
 # ===============================
 # ⚙️ CACHING FÜR MONATSDATEN
@@ -41,42 +34,43 @@ def load_excel(file):
         st.error("Der erwartete Header wurde in der ersten Excel-Datei nicht gefunden.")
         return pd.DataFrame()
 
-# --- KORREKTUR 1: ROBUSTERE DATEN-TRANSFORMATION ---
+
+# --- KORREKTUR: ZURÜCK ZUR URSPRÜNGLICHEN, FUNKTIONIERENDEN LOGIK ---
 @st.cache_data(show_spinner=True)
 def transform_monthly_data(df):
-    # Heuristik: Eine "Standort-Zeile" hat einen Wert in 'Steuergerät ID', aber keinen in 'EVSE-ID'.
-    # Dies ist stabiler als die alte Methode.
-    df['Standort'] = df.where(df['EVSE-ID'].isna())['Steuergerät ID']
-    df['Standort'] = df['Standort'].fillna(method='ffill')
+    # Diese Methode hat funktioniert und wird wiederhergestellt.
+    # Der Standortname wird aus der Spalte "Ist in kWh" extrahiert.
+    df["Standort"] = df["Ist in kWh"].fillna(method="ffill")
 
-    # Entferne die reinen Standort-Zeilen, da sie keine Messdaten enthalten.
-    df_clean = df.dropna(subset=['EVSE-ID']).copy()
-
-    df_clean = df_clean.rename(columns={
+    df = df.rename(columns={
         "Steuergerät ID": "Steuergerät",
         "EVSE-ID": "EVSE",
         "YTD-Summe": "YTD_Summe",
         "YTD-Schnitt (pro Monat)": "YTD_Schnitt"
     })
-    
-    month_order = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"]
+
+    # Entferne die Zeilen, die nur den Standortnamen enthalten, aber keine echten Daten.
+    df_clean = df.dropna(subset=['EVSE', 'Steuergerät']).copy()
+
+    month_order = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+                   "November", "Dezember"]
     id_cols = ["Standort", "Steuergerät", "EVSE", "YTD_Summe", "YTD_Schnitt"]
-    
-    # Sicherstellen, dass alle Spalten, die geschmolzen werden sollen, existieren
+
     value_vars_exist = [c for c in month_order if c in df_clean.columns]
-    
+
     df_long = df_clean.melt(
-        id_vars=id_cols, 
-        value_vars=value_vars_exist, 
-        var_name="Monat", 
+        id_vars=id_cols,
+        value_vars=value_vars_exist,
+        var_name="Monat",
         value_name="Energiemenge"
     )
-    
+
     df_long["Energiemenge"] = pd.to_numeric(df_long["Energiemenge"], errors="coerce")
     df_long = df_long.dropna(subset=["Energiemenge", "Standort"])
     df_long["Monat"] = pd.Categorical(df_long["Monat"], categories=month_order, ordered=True)
     df_long = df_long.sort_values(["Standort", "Monat"])
     return df_long
+
 
 # ===============================
 # ⚙️ FINALE, FLEXIBLE GEO-FUNKTION
@@ -105,20 +99,32 @@ def load_geo_excel_final(file):
             is_evse_id_row = re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val_str, re.IGNORECASE)
             if is_steuergeraet_row and val_str:
                 if all((current_steuergerät, ladepunkte, laengengrad is not None, breitengrad is not None)):
-                    for lp in ladepunkte: geo_records.append({"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp, "Längengrad": laengengrad, "Breitengrad": breitengrad})
+                    for lp in ladepunkte: geo_records.append(
+                        {"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
+                         "Längengrad": laengengrad, "Breitengrad": breitengrad})
                 current_steuergerät, ladepunkte, laengengrad, breitengrad = val_str, [], None, None
                 continue
-            if is_evse_id_row: ladepunkte.append(val_str)
+            if is_evse_id_row:
+                ladepunkte.append(val_str)
             elif label.lower() == "längengrad":
-                try: laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
-                except (ValueError, IndexError): laengengrad = None
+                try:
+                    laengengrad = float(
+                        re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
+                except (ValueError, IndexError):
+                    laengengrad = None
             elif label.lower() == "breitengrad":
-                try: breitengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
-                except (ValueError, IndexError): breitengrad = None
+                try:
+                    breitengrad = float(
+                        re.findall(r"[-+]?\d*\.\d+|\d+", val_str.replace(",", ".").replace("°", "").strip())[0])
+                except (ValueError, IndexError):
+                    breitengrad = None
         if all((current_steuergerät, ladepunkte, laengengrad is not None, breitengrad is not None)):
-            for lp in ladepunkte: geo_records.append({"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp, "Längengrad": laengengrad, "Breitengrad": breitengrad})
+            for lp in ladepunkte: geo_records.append(
+                {"Standort": str(standort_name), "Steuergerät": current_steuergerät, "EVSE-ID": lp,
+                 "Längengrad": laengengrad, "Breitengrad": breitengrad})
     geo_df = pd.DataFrame(geo_records)
     return geo_df if geo_df.empty else geo_df.dropna(subset=["Breitengrad", "Längengrad"])
+
 
 # ===============================
 # 📂 SIDEBAR: Datei-Uploads
@@ -142,7 +148,8 @@ if uploaded_file_1:
         if standorte:
             selected_standort = st.selectbox("Standort auswählen:", standorte)
             df_filtered = df_data[df_data["Standort"] == selected_standort]
-            st.markdown(f"**Anzahl Ladepunkte:** {df_filtered['EVSE'].nunique()} | **Steuergeräte:** {df_filtered['Steuergerät'].nunique()}")
+            st.markdown(
+                f"**Anzahl Ladepunkte:** {df_filtered['EVSE'].nunique()} | **Steuergeräte:** {df_filtered['Steuergerät'].nunique()}")
             df_chart = df_filtered.groupby("Monat")["Energiemenge"].sum().reset_index()
             st.bar_chart(df_chart, x="Monat", y="Energiemenge", use_container_width=True)
 else:
@@ -171,16 +178,18 @@ if df_data is not None and uploaded_file_2:
         df_merged = pd.merge(df_sum, df_geo_unique, on="Standort", how="inner")
         if not df_merged.empty:
             st.pydeck_chart(pdk.Deck(
-                map_provider="mapbox",
-                map_style=pdk.map_styles.SATELLITE, # Oder z.B. pdk.map_styles.LIGHT
-                api_keys={'mapbox': MAPBOX_API_KEY},
-                initial_view_state=pdk.ViewState(latitude=df_merged["Breitengrad"].mean(), longitude=df_merged["Längengrad"].mean(), zoom=6, pitch=45),
+                map_style="open-street-map",
+                initial_view_state=pdk.ViewState(latitude=df_merged["Breitengrad"].mean(),
+                                                 longitude=df_merged["Längengrad"].mean(), zoom=6, pitch=45),
                 layers=[
-                    pdk.Layer("HeatmapLayer", data=df_merged, get_position='[Längengrad, Breitengrad]', get_weight="Energiemenge", radiusPixels=60, aggregation=pdk.types.String("SUM")),
+                    pdk.Layer("HeatmapLayer", data=df_merged, get_position='[Längengrad, Breitengrad]',
+                              get_weight="Energiemenge", radiusPixels=60, aggregation=pdk.types.String("SUM")),
                 ],
-                tooltip={"html": "<b>Standort:</b> {Standort} <br/> <b>Energiemenge:</b> {Energiemenge} kWh", "style": {"backgroundColor": "steelblue", "color": "white"}}
+                tooltip={"html": "<b>Standort:</b> {Standort} <br/> <b>Energiemenge:</b> {Energiemenge} kWh",
+                         "style": {"backgroundColor": "steelblue", "color": "white"}}
             ))
         else:
-            st.warning(f"Keine übereinstimmenden Standorte mit Energiedaten für den Zeitraum '{selected_timespan}' gefunden.")
+            st.warning(
+                f"Keine übereinstimmenden Standorte mit Energiedaten für den Zeitraum '{selected_timespan}' gefunden.")
     else:
         st.warning("Die hochgeladene Geo-Datei enthält keine gültigen oder auslesbaren Koordinaten.")
