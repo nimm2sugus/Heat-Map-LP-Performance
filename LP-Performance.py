@@ -65,22 +65,24 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ NEUE GEO-FUNKTION
+# ⚙️ GEO-FUNKTION (alle Standorte, korrektes Mapping)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
     """
     Liest das Geo-Excel ein und erstellt eine flache Tabelle für alle Standorte.
+    Korrigiert die Zeilenverschiebung für Standort und Steuergeräte.
     """
     raw = pd.read_excel(file, header=None)
     geo_records = []
 
     # Jede Spalte ab 1 (erste Spalte = Labels)
     for col_idx in range(1, raw.shape[1]):
-        standort = str(raw.iloc[0, col_idx]).strip()
+        standort = str(raw.iloc[1, col_idx]).strip()  # Standortname in Zeile 2
         if not standort or standort.lower() == "nan":
             continue
-        col_data = raw.iloc[1:, [0, col_idx]].dropna(subset=[col_idx])
+
+        col_data = raw.iloc[2:, [0, col_idx]].dropna(subset=[col_idx])  # ab Zeile 3: Labels & Werte
         col_data.columns = ["Label", "Value"]
         col_data["Label"] = col_data["Label"].astype(str).str.strip()
         col_data["Value"] = col_data["Value"].astype(str).str.strip()
