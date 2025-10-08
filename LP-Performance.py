@@ -22,28 +22,16 @@ Diese App liest Excel-Dateien mit Monatswerten pro Ladepunkt und erstellt:
 """)
 
 # ===============================
-# ⚙️ HELPER FÜR DYNAMISCHES HEADER-FINDEN (Monatsdaten)
-# ===============================
-def find_header_row(file, required_columns):
-    raw = pd.read_excel(file, header=None)
-    for i, row in raw.iterrows():
-        row_values = [str(col).strip() for col in row]
-        if all(req in row_values for req in required_columns):
-            return i, raw
-    raise ValueError(f"Keine passende Header-Zeile gefunden. Erwartete Spalten: {required_columns}")
-
-def load_excel_dynamic(file, required_columns):
-    header_row, _ = find_header_row(file, required_columns)
-    df = pd.read_excel(file, header=header_row)
-    return df
-
-# ===============================
-# ⚙️ CACHING
+# ⚙️ CACHING FÜR MONATSDATEN
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_excel(file):
     expected_cols = ["Steuergerät ID", "EVSE-ID", "Ist in kWh", "YTD-Summe", "YTD-Schnitt (pro Monat)"]
-    return load_excel_dynamic(file, expected_cols)
+    raw = pd.read_excel(file, header=None)
+    # Header dynamisch suchen
+    header_row = raw.apply(lambda row: all(col in row.values for col in expected_cols), axis=1).idxmax()
+    df = pd.read_excel(file, header=header_row)
+    return df
 
 @st.cache_data(show_spinner=True)
 def transform_monthly_data(df):
@@ -75,7 +63,7 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ ROBUSTE GEO-FUNKTION
+# ⚙️ ROBUSTE GEO-FUNKTION (mehrere Steuergeräte pro Standort)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
@@ -97,15 +85,31 @@ def load_geo_excel(file):
             val = str(val).strip().replace(",", ".").replace("°", "")
             label = labels[i]
 
-            if label == "Steuergerät":
+            # Neues Steuergerät starten
+            if label == "Steuergerät" and val:
+                # Vorherige Ladepunkte speichern
+                if current_steuergerät and ladepunkte:
+                    for lp in ladepunkte:
+                        geo_records.append({
+                            "Standort": str(standort),
+                            "Steuergerät": current_steuergerät,
+                            "Ladepunkt": lp,
+                            "Längengrad": laengengrad,
+                            "Breitengrad": breitengrad
+                        })
+                # Neues Steuergerät initialisieren
                 current_steuergerät = val
                 ladepunkte = []
+                laengengrad = None
+                breitengrad = None
                 continue
 
+            # Ladepunkt sammeln
             if label == "Ladepunkt" and re.match(r"DE\*ARK\*E\d{5}\*\d{3}", val):
                 ladepunkte.append(val)
                 continue
 
+            # Koordinaten speichern
             if label == "Längengrad":
                 try:
                     laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
@@ -120,7 +124,7 @@ def load_geo_excel(file):
                     breitengrad = None
                 continue
 
-        # Alle Ladepunkte abspeichern
+        # Letzte Ladepunkte speichern
         if current_steuergerät and ladepunkte:
             for lp in ladepunkte:
                 geo_records.append({
@@ -132,12 +136,6 @@ def load_geo_excel(file):
                 })
 
     geo_df = pd.DataFrame(geo_records)
-
-    # Sicherstellen, dass die Spalten existieren
-    for col in ["Breitengrad", "Längengrad"]:
-        if col not in geo_df.columns:
-            geo_df[col] = None
-
     geo_df = geo_df.dropna(subset=["Breitengrad", "Längengrad"])
     return geo_df
 
