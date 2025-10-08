@@ -105,16 +105,15 @@ def load_geo_excel(file):
 
         for i in range(len(col_data)):
             val = str(col_data[i]).strip().replace(",", ".").replace("°", "")
-            label = val.lower()
 
-            # Längengrad / Breitengrad erkennen
-            if "längengrad" in label:
+            # Längengrad / Breitengrad: erster Buchstabe groß, exakt so wie in Excel
+            if val.startswith("Längengrad"):
                 try:
                     laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
                     laengengrad = None
                 continue
-            elif "breitengrad" in label:
+            elif val.startswith("Breitengrad"):
                 try:
                     breitengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
                 except:
@@ -143,7 +142,6 @@ def load_geo_excel(file):
                 })
 
     geo_df = pd.DataFrame(geo_records).drop_duplicates()
-    # NaNs filtern, da pydeck sonst nicht rendert
     geo_df = geo_df.dropna(subset=["Breitengrad", "Längengrad"])
     return geo_df
 
