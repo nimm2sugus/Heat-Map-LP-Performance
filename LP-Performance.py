@@ -121,45 +121,27 @@ uploaded_file_1 = st.sidebar.file_uploader("Lade Monatsdaten (Test LP-Tool.xlsx)
 uploaded_file_2 = st.sidebar.file_uploader("Lade Geokoordinaten (LS-Geokoordinaten.xlsx)", type=["xlsx"], key="file2")
 
 # ===============================
-# 📈 DATENANALYSE & FILTER
+# 📈 GESAMT-DATENANALYSE
 # ===============================
 df_data, df_geo = None, None
 if uploaded_file_1 and uploaded_file_2:
     df_data = transform_monthly_data(load_excel(uploaded_file_1))
-    # --- HIER IST DIE KORREKTUR ---
     df_geo = load_geo_excel_final(uploaded_file_2)
 else:
     st.info("Bitte laden Sie beide Excel-Dateien hoch, um die Analyse zu starten.")
 
 if df_data is not None and not df_data.empty:
-    st.header("📊 Standort- und Gerätedaten")
-    standorte = sorted(df_data["Standort"].dropna().unique())
+    st.header("📊 Monatliche Gesamtenergiemenge (Alle Standorte)")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        selected_standort = st.selectbox("1. Standort auswählen:", standorte)
-
-    df_standort_filtered = df_data[df_data["Standort"] == selected_standort]
-
-    with col2:
-        steuergeraete_options = ["Alle Steuergeräte"] + df_standort_filtered["Steuergerät"].unique().tolist()
-        selected_steuergeraet = st.selectbox("2. Steuergerät auswählen (optional):", steuergeraete_options)
-
-    if selected_steuergeraet == "Alle Steuergeräte":
-        df_display = df_standort_filtered
-    else:
-        df_display = df_standort_filtered[df_standort_filtered["Steuergerät"] == selected_steuergeraet]
-
-    st.markdown(
-        f"**Angezeigte Ladepunkte:** {df_display['EVSE'].nunique()} | **Angezeigte Steuergeräte:** {df_display['Steuergerät'].nunique()}")
-    df_chart = df_display.groupby("Monat")["Energiemenge"].sum().reset_index()
-    st.bar_chart(df_chart, x="Monat", y="Energiemenge", use_container_width=True)
+    # --- NEU: Ein großes Diagramm für alle Standorte ---
+    df_chart_total = df_data.groupby("Monat")["Energiemenge"].sum().reset_index()
+    st.bar_chart(df_chart_total, x="Monat", y="Energiemenge", use_container_width=True)
 
 # ===============================
-# 🗺️ INTERAKTIVE HEATMAP
+# 🗺️ GESAMT-HEATMAP
 # ===============================
 if df_data is not None and df_geo is not None and not df_geo.empty:
-    st.header("🌍 Interaktive Heatmap")
+    st.header("🌍 Interaktive Heatmap (Alle Standorte)")
 
     time_options = ["Gesamtzeit"] + df_data['Monat'].unique().tolist()
     selected_timespan = st.selectbox("Zeitraum für Heatmap auswählen:", time_options)
@@ -173,30 +155,28 @@ if df_data is not None and df_geo is not None and not df_geo.empty:
     df_geo_unique = df_geo.groupby(["Standort", "Steuergerät"])[["Breitengrad", "Längengrad"]].first().reset_index()
     df_merged = pd.merge(df_sum, df_geo_unique, on=["Standort", "Steuergerät"], how="inner")
 
-    df_view = df_merged[df_merged["Standort"] == selected_standort]
-    if selected_steuergeraet != "Alle Steuergeräte":
-        df_view = df_view[df_view["Steuergerät"] == selected_steuergeraet]
-
-    if not df_view.empty:
-        df_standort_marker = df_view.groupby('Standort').agg(
+    if not df_merged.empty:
+        # --- NEU: Standort-Marker werden immer für alle Standorte erstellt ---
+        df_standort_marker = df_merged.groupby('Standort').agg(
             Breitengrad=('Breitengrad', 'mean'),
             Längengrad=('Längengrad', 'mean')
         ).reset_index()
 
-        zoom_level = 12 if selected_steuergeraet != "Alle Steuergeräte" else 10
         use_mapbox = MAPBOX_API_KEY != "DEIN_KEY_HIER" and MAPBOX_API_KEY != ""
 
         st.pydeck_chart(pdk.Deck(
             map_provider="mapbox" if use_mapbox else None,
             map_style=pdk.map_styles.SATELLITE if use_mapbox else 'open-street-map',
             api_keys={'mapbox': MAPBOX_API_KEY} if use_mapbox else None,
-            initial_view_state=pdk.ViewState(latitude=df_view["Breitengrad"].mean(),
-                                             longitude=df_view["Längengrad"].mean(), zoom=zoom_level, pitch=45),
+            # Startansicht zeigt alle Daten
+            initial_view_state=pdk.ViewState(latitude=df_merged["Breitengrad"].mean(),
+                                             longitude=df_merged["Längengrad"].mean(), zoom=5, pitch=45),
             layers=[
-                pdk.Layer("HeatmapLayer", data=df_view, get_position='[Längengrad, Breitengrad]',
+                pdk.Layer("HeatmapLayer", data=df_merged, get_position='[Längengrad, Breitengrad]',
                           get_weight="Energiemenge", radiusPixels=80),
-                pdk.Layer("ScatterplotLayer", data=df_view, get_position='[Längengrad, Breitengrad]', get_radius=100,
+                pdk.Layer("ScatterplotLayer", data=df_merged, get_position='[Längengrad, Breitengrad]', get_radius=100,
                           get_fill_color='[255, 140, 0, 100]', pickable=True),
+                # Die Text-Ebene zeigt die Standortnamen
                 pdk.Layer("TextLayer", data=df_standort_marker, get_position='[Längengrad, Breitengrad]',
                           get_text='Standort', get_size=16, get_color='[255, 255, 255]',
                           get_background_color='[0, 0, 0, 120]', background=True)
