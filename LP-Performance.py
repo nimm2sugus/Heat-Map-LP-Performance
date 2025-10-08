@@ -63,7 +63,7 @@ def transform_monthly_data(df):
     return df_long
 
 # ===============================
-# ⚙️ ROBUSTE GEO-FUNKTION (mehrere Steuergeräte pro Standort, Labels in Spalte A)
+# ⚙️ ROBUSTE GEO-FUNKTION (mehrere Steuergeräte, Labels in Spalte A, robuste Koordinaten)
 # ===============================
 @st.cache_data(show_spinner=True)
 def load_geo_excel(file):
@@ -82,11 +82,11 @@ def load_geo_excel(file):
         ladepunkte = []
 
         for i, val in enumerate(col_values):
-            val = str(val).strip().replace(",", ".").replace("°", "")
+            val = str(val).strip()
             label = labels[i]
 
             if label == "Steuergerät" and val:
-                # vorherige Ladepunkte speichern
+                # Vorherige Ladepunkte speichern
                 if current_steuergerät and ladepunkte:
                     for lp in ladepunkte:
                         geo_records.append({
@@ -96,7 +96,7 @@ def load_geo_excel(file):
                             "Längengrad": laengengrad,
                             "Breitengrad": breitengrad
                         })
-                # neues Steuergerät initialisieren
+                # Neues Steuergerät initialisieren
                 current_steuergerät = val
                 ladepunkte = []
                 laengengrad = None
@@ -107,21 +107,26 @@ def load_geo_excel(file):
                 ladepunkte.append(val)
                 continue
 
-            if label == "Längengrad":
+            # Koordinaten robust parsen
+            if label == "Längengrad" and val:
                 try:
-                    laengengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
+                    val_clean = val.replace(",", ".").replace("°", "")
+                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_clean)
+                    laengengrad = float(matches[0]) if matches else None
                 except:
                     laengengrad = None
                 continue
 
-            if label == "Breitengrad":
+            if label == "Breitengrad" and val:
                 try:
-                    breitengrad = float(re.findall(r"[-+]?\d*\.\d+|\d+", val)[0])
+                    val_clean = val.replace(",", ".").replace("°", "")
+                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", val_clean)
+                    breitengrad = float(matches[0]) if matches else None
                 except:
                     breitengrad = None
                 continue
 
-        # letzte Ladepunkte speichern
+        # Letzte Ladepunkte speichern
         if current_steuergerät and ladepunkte:
             for lp in ladepunkte:
                 geo_records.append({
